@@ -5,12 +5,11 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: Build for ${{ matrix.target }} (${{ matrix.arch }})
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -19,17 +18,17 @@ jobs:
           - os: macos-14
             arch: arm64
             target: mac
-            output_name: TeamsEcho-macos-v1.0.9.zip
+            output_name: TeamsEcho-macos-v1.1.0.zip
             
           - os: macos-14
             arch: x64
             target: mac
-            output_name: TeamsEcho-intel-v1.0.9.zip
+            output_name: TeamsEcho-intel-v1.1.0.zip
 
           - os: windows-latest
             arch: x64
             target: win
-            output_name: TeamsEcho-windows-v1.0.9.zip
+            output_name: TeamsEcho-windows-v1.1.0.zip
 
     steps:
       - name: 1. 检出源代码
@@ -47,7 +46,6 @@ jobs:
       - name: 4. 执行自动化编译 (沙箱纯本地化构建)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          ELECTRON_BUILDER_ALLOW_UNTRUSTED_CA: true
         run: |
           npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
 
@@ -93,6 +91,8 @@ jobs:
   publish:
     name: Public Secure Release Artifacts
     needs: build
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: 1. 下载所有二进制包
@@ -105,7 +105,7 @@ jobs:
           mkdir release-dir
           find all-artifacts -type f -exec cp {} release-dir/ \;
           cd release-dir
-          echo "### TeamsEcho v1.0.9 SHA-256 Checksums" > csm-manifest.txt
+          echo "### TeamsEcho v1.1.0 SHA-256 Checksums" > csm-manifest.txt
           cat *.sha256 >> csm-manifest.txt
           rm *.sha256
 
