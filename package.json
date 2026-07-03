@@ -1,0 +1,31 @@
+{
+  "name": "teamsecho",
+  "version": "1.0.0",
+  "description": "Microsoft Teams 桌面自动化辅助工具",
+  "main": "src/main.js",
+  "author": "Secure Artifacts",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.secureartifacts.teamsecho",
+    "productName": "TeamsEcho",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": ["zip"],
+      "identity": null
+    },
+    "win": {
+      "target": ["zip"]
+    },
+    "asar": true
+  }
+}

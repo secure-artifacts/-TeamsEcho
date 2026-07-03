@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TeamsEcho v1.0.0</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
+    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
+    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
+    label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; display: block; }
+    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; }
+    .editor-container { flex: 1; display: flex; flex-direction: column; margin-bottom: 15px; }
+    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 10px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; }
+    .rich-editor:focus { border-color: #007aff; }
+    .toolbar { background: #f2f2f7; border: 1px solid #d1d1d6; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 5px; display: flex; gap: 10px; }
+    .toolbar button { background: none; border: none; cursor: pointer; font-size: 13px; padding: 3px 8px; border-radius: 4px; }
+    .toolbar button:hover { background: #e5e5ea; }
+    .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
+    .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
+    .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
+    .btn-group { display: flex; gap: 12px; }
+    .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center; }
+    .btn-start { background: #34c759; color: white; }
+    .btn-start:hover { background: #28a745; }
+    .btn-stop { background: #ff3b30; color: white; }
+    .btn-stop:hover { background: #dc3545; }
+    .footer-tip { background: #fff3cd; color: #856404; font-size: 12px; padding: 8px; text-align: center; border-top: 1px solid #ffeeba; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="left-panel">
+      <label>👥 名单输入 (一行一个名字)</label>
+      <textarea id="namesInput" placeholder="张三&#10;李四&#10;#王五 (带#跳过)"></textarea>
+    </div>
+    <div class="right-panel">
+      <div class="editor-container">
+        <label>💬 消息内容 (支持右键/快捷键粘贴超链接与基础表格)</label>
+        <div class="toolbar">
+          <button onclick="document.execCommand('createLink', false, prompt('请输入链接URL:', 'https://'))">🔗 插入超链接</button>
+          <button onclick="insertBasicTable()">📊 插入基础表格</button>
+        </div>
+        <div id="richEditor" class="rich-editor" contenteditable="true" placeholder="在此输入团队通知内容..."></div>
+      </div>
+      <div class="control-area">
+        <div id="previewText" class="preview-text">👥 待提及名单: 共 0 人</div>
+        <div id="progressText" class="progress-text">📊 状态: 等待运行...</div>
+        <div class="btn-group">
+          <button id="startBtn" class="btn btn-start">▶️ 开始自动化发送</button>
+          <button id="stopBtn" class="btn btn-stop">⏹️ 停止模拟 (Esc)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-tip">⚠️ 隐私保护安全提示：本软件完全在本地内存运行。关闭窗口或退出程序将彻底清空当前所有输入，绝不向云端传输或在本地留存任何草稿。</div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    // 基础表格模板插入
+    function insertBasicTable() {
+      const tableHtml = `<table border="1" style="border-collapse: collapse; width: 100%;"><tr><th>项目</th><th>进度</th></tr><tr><td>任务A</td><td>已完成</td></tr></table><br>`;
+      document.execCommand('insertHTML', false, tableHtml);
+    }
+
+    const namesInput = document.getElementById('namesInput');
+    const richEditor = document.getElementById('richEditor');
+    const previewText = document.getElementById('previewText');
+    const progressText = document.getElementById('progressText');
+
+    function getCleanNames() {
+      return namesInput.value.split('\n')
+        .map(n => n.trim())
+        .filter(n => n.length > 0 && !n.startsWith('#'));
+    }
+
+    // 实时名单解析预览
+    namesInput.addEventListener('input', () => {
+      const names = getCleanNames();
+      previewText.innerText = `👥 最终会 @ 这些人: ${names.join(', ') || '无'} (共 ${names.length} 人)`;
+    });
+
+    document.getElementById('startBtn').addEventListener('click', () => {
+      const names = getCleanNames();
+      if(names.length === 0) { alert('请输入有效名单！'); return; }
+      const htmlContent = richEditor.innerHTML;
+      const textContent = richEditor.innerText;
+      ipcRenderer.send('start-automation', { names, htmlContent, textContent });
+    });
+
+    document.getElementById('stopBtn').addEventListener('click', () => {
+      ipcRenderer.send('stop-automation');
+    });
+
+    ipcRenderer.on('status-update', (event, msg) => {
+      progressText.innerText = msg;
+    });
+  </script>
+</body>
+</html>
