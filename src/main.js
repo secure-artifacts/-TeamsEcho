@@ -33,7 +33,6 @@ function createWindow () {
 
 app.whenReady().then(createWindow);
 
-// 基于用户 M 芯片参数深度调优的 AppleScript 桥接执行
 function runAppleScriptForPerson(name) {
   return new Promise((resolve) => {
     const script = `
@@ -54,34 +53,37 @@ function runAppleScriptForPerson(name) {
         delay 0.05
       end tell
     `;
-    
     clipboard.writeText(name);
-    exec(`osascript -e '${script}'`, (err) => {
-      resolve(err ? false : true);
-    });
+    exec(`osascript -e '${script}'`, (err) => { resolve(err ? false : true); });
   });
 }
 
-// 模拟最后一步粘贴富文本内容
 function pasteRichContent(html, text) {
-  clipboard.write({ html: html, text: text });
-  const script = `
-    tell application "Microsoft Teams" to activate
-    delay 0.1
-    tell application "System Events"
-      keystroke "v" using command down
+  return new Promise((resolve) => {
+    clipboard.write({ html: html, text: text });
+    const script = `
+      tell application "Microsoft Teams" to activate
       delay 0.1
-    end tell
-  `;
-  exec(`osascript -e '${script}'`);
+      tell application "System Events"
+        keystroke "v" using command down
+        delay 0.1
+      end tell
+    `;
+    exec(`osascript -e '${script}'`, () => { resolve(); });
+  });
+}
+
+function sendNativeKey(keyCode) {
+  return new Promise((resolve) => {
+    exec(`osascript -e 'tell application "System Events" to key code ${keyCode}'`, () => { resolve(); });
+  });
 }
 
 ipcMain.on('start-automation', async (event, data) => {
-  const { names, htmlContent, textContent } = data;
+  const { names, htmlContent, textContent, sequenceMode } = data;
   isStopping = false;
   const originalClipboard = clipboard.readText();
 
-  // 1. 前置激活 Teams 窗口
   exec('osascript -e \'tell application "Microsoft Teams" to activate\'', async (err) => {
     if (err) {
       event.reply('status-update', '❌ 错误: 未能在系统中检测到 Microsoft Teams 客户端！');
@@ -89,46 +91,48 @@ ipcMain.on('start-automation', async (event, data) => {
     }
 
     event.reply('status-update', '🛡️ 安全机制：正在强制 Teams 开启富文本长文模式...');
-    
-    // 【核心新增安全锁】：模拟按下 Cmd+Shift+X 强制开启 Teams 富文本框
     await new Promise((res) => {
-      const forceRichScript = `
-        tell application "System Events"
-          keystroke "x" using {command down, shift down}
-        end tell
-      `;
-      exec(`osascript -e '${forceRichScript}'`, () => res());
+      exec(`osascript -e 'tell application "System Events" to keystroke "x" using {command down, shift down}'`, () => res());
     });
-    
-    // 稍作呼吸停顿，确保 Teams 框完全展开
     await new Promise(res => setTimeout(res, 300));
 
-    // 2. 开始循环模拟 @ 提及
-    for (let i = 0; i < names.length; i++) {
-      if (isStopping) {
-        event.reply('status-update', '⏹️ 自动化已被中断，当前已安全停止。');
-        clipboard.writeText(originalClipboard);
-        return;
+    // 执行分支控制：判定用户自选的顺序模式
+    if (sequenceMode === 'mentionFirst') {
+      // 模式一：先 @ 提及，再发消息体
+      for (let i = 0; i < names.length; i++) {
+        if (isStopping) break;
+        event.reply('status-update', `📈 [模式A] 正在 @ 第 ${i + 1}/${names.length} 位：${names[i]}`);
+        await runAppleScriptForPerson(names[i]);
+        await new Promise((res) => { exec(`osascript -e 'tell application "System Events" to keystroke " "'`, () => res()); });
       }
+      if (!isStopping) {
+        // 在 @ 完所有人后换个行，再灌入正文，排版最规整
+        await sendNativeKey(36); 
+        event.reply('status-update', '🔗 正在追加正文内容...');
+        await pasteRichContent(htmlContent, textContent);
+      }
+    } else {
+      // 模式二：先发正文，再在末尾追加 @ 提及
+      event.reply('status-update', '🔗 正在首发注入消息正文内容...');
+      await pasteRichContent(htmlContent, textContent);
+      // 正文灌入后换行，让 @ 名单整齐列在尾部
+      await sendNativeKey(36); 
 
-      event.reply('status-update', `📈 正在 @ 第 ${i + 1}/${names.length} 位成员：${names[i]}`);
-      await runAppleScriptForPerson(names[i]);
-      
-      // 在富文本模式下，每 @ 完一个人，自动敲一个空格作为间隔，更加美观规范
-      await new Promise((res) => {
-        exec(`osascript -e 'tell application "System Events" to keystroke " "'`, () => res());
-      });
+      for (let i = 0; i < names.length; i++) {
+        if (isStopping) break;
+        event.reply('status-update', `📈 [模式B] 正在追加 @ 第 ${i + 1}/${names.length} 位：${names[i]}`);
+        await runAppleScriptForPerson(names[i]);
+        await new Promise((res) => { exec(`osascript -e 'tell application "System Events" to keystroke " "'`, () => res()); });
+      }
     }
 
-    // 3. 所有人员 @ 提及完毕后，灌入消息正文
-    event.reply('status-update', '🔗 正在注入带格式的消息正文...');
-    pasteRichContent(htmlContent, textContent);
-    event.reply('status-update', '✅ 批量 @ 提及与富文本消息注入已全部完美完成！');
-    
+    if (isStopping) {
+      event.reply('status-update', '⏹️ 自动化已被安全中断。');
+    } else {
+      event.reply('status-update', '✅ 全流程自动化注入已全部完美完成！');
+    }
     setTimeout(() => { clipboard.writeText(originalClipboard); }, 500);
   });
 });
 
-ipcMain.on('stop-automation', () => {
-  isStopping = true;
-});
+ipcMain.on('stop-automation', () => { isStopping = true; });

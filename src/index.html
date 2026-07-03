@@ -5,19 +5,18 @@
   <title>TeamsEcho</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-    .header-bar { text-align: center; font-size: 14px; font-weight: bold; color: #333; padding: 10px 0; background: #f5f5f7; border-bottom: 1px solid #e5e5ea; }
     .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
     .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
     .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
     label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; display: block; }
     textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; }
     .editor-container { flex: 1; display: flex; flex-direction: column; margin-bottom: 15px; }
-    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 10px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; }
+    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; }
     .rich-editor:focus { border-color: #007aff; }
-    .toolbar { background: #f2f2f7; border: 1px solid #d1d1d6; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 5px; display: flex; gap: 10px; }
-    .toolbar button { background: none; border: none; cursor: pointer; font-size: 13px; padding: 3px 8px; border-radius: 4px; }
-    .toolbar button:hover { background: #e5e5ea; }
     .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
+    .setting-row { margin-bottom: 12px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
+    .setting-select { padding: 5px 10px; border-radius: 5px; border: 1px solid #d1d1d6; outline: none; font-size: 13px; background: white; cursor: pointer; color: #333; font-weight: 500; }
+    .setting-select:focus { border-color: #007aff; }
     .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
     .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
     .btn-group { display: flex; gap: 12px; }
@@ -30,7 +29,6 @@
   </style>
 </head>
 <body>
-  <div id="uiHeaderTitle" class="header-bar">TeamsEcho Loading...</div>
   <div class="container">
     <div class="left-panel">
       <label>👥 名单输入 (一行一个名字)</label>
@@ -38,14 +36,17 @@
     </div>
     <div class="right-panel">
       <div class="editor-container">
-        <label>💬 消息内容 (支持右键/快捷键粘贴超链接与基础表格)</label>
-        <div class="toolbar">
-          <button onclick="document.execCommand('createLink', false, prompt('请输入链接URL:', 'https://'))">🔗 插入超链接</button>
-          <button onclick="insertBasicTable()">📊 插入基础表格</button>
-        </div>
+        <label>💬 消息内容 (支持直接输入或右键/快捷键粘贴富文本)</label>
         <div id="richEditor" class="rich-editor" contenteditable="true" placeholder="在此输入团队通知内容..."></div>
       </div>
       <div class="control-area">
+        <div class="setting-row">
+          <label style="margin: 0;">⚙️ 发送逻辑链顺序:</label>
+          <select id="sequenceMode" class="setting-select">
+            <option value="mentionFirst">先批量 @ 提及成员 ──> 再追加消息正文内容</option>
+            <option value="textFirst">先写入消息正文内容 ──> 再在末尾批量 @ 提及成员</option>
+          </select>
+        </div>
         <div id="previewText" class="preview-text">👥 待提及名单: 共 0 人</div>
         <div id="progressText" class="progress-text">📊 状态: 等待运行...</div>
         <div class="btn-group">
@@ -57,29 +58,23 @@
   </div>
   <div class="footer-tip">⚠️ 隐私保护安全提示：本软件完全在本地内存运行。关闭窗口或退出程序将彻底清空当前所有输入，绝不向云端传输或在本地留存任何草稿。</div>
 
-  <script>
+  <script {sandbox}>
     const { ipcRenderer } = require('electron');
     const fs = require('fs');
     const path = require('path');
 
     try {
       const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
-      const currentVersion = packageJson.version;
-      document.getElementById('uiHeaderTitle').innerText = `TeamsEcho v${currentVersion}`;
-      document.title = `TeamsEcho v${currentVersion}`;
+      document.title = `TeamsEcho v${packageJson.version}`;
     } catch (e) {
-      document.getElementById('uiHeaderTitle').innerText = `TeamsEcho`;
-    }
-    
-    function insertBasicTable() {
-      const tableHtml = `<table border="1" style="border-collapse: collapse; width: 100%;"><tr><th>项目</th><th>进度</th></tr><tr><td>任务A</td><td>已完成</td></tr></table><br>`;
-      document.execCommand('insertHTML', false, tableHtml);
+      document.title = `TeamsEcho`;
     }
 
     const namesInput = document.getElementById('namesInput');
     const richEditor = document.getElementById('richEditor');
     const previewText = document.getElementById('previewText');
     const progressText = document.getElementById('progressText');
+    const sequenceMode = document.getElementById('sequenceMode');
 
     function getCleanNames() {
       return namesInput.value.split('\n')
@@ -97,7 +92,8 @@
       if(names.length === 0) { alert('请输入有效名单！'); return; }
       const htmlContent = richEditor.innerHTML;
       const textContent = richEditor.innerText;
-      ipcRenderer.send('start-automation', { names, htmlContent, textContent });
+      const mode = sequenceMode.value;
+      ipcRenderer.send('start-automation', { names, htmlContent, textContent, sequenceMode: mode });
     });
 
     document.getElementById('stopBtn').addEventListener('click', () => {
