@@ -1,6 +1,6 @@
 {
   "name": "teamsecho",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Microsoft Teams 桌面自动化辅助工具",
   "main": "src/main.js",
   "author": "Secure Artifacts",

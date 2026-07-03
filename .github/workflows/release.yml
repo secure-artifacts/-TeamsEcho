@@ -19,17 +19,17 @@ jobs:
           - os: macos-14
             arch: arm64
             target: mac
-            output_name: TeamsEcho-macOS-v1.0.0.zip
+            output_name: TeamsEcho-macos-v1.0.1.zip
             
           - os: macos-13
             arch: x64
             target: mac
-            output_name: TeamsEcho-intel-v1.0.0.zip
+            output_name: TeamsEcho-intel-v1.0.1.zip
 
           - os: windows-latest
             arch: x64
             target: win
-            output_name: TeamsEcho-Windows-x64-v1.0.0.zip
+            output_name: TeamsEcho-windows-v1.0.1.zip
 
     steps:
       - name: 1. 检出源代码
@@ -44,24 +44,25 @@ jobs:
       - name: 3. 安装依赖
         run: npm ci
 
-      - name: 4. 执行自动化编译
+      - name: 4. 执行自动化编译 (沙箱纯本地化构建)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          ELECTRON_BUILDER_ALLOW_UNTRUSTED_CA: true
         run: |
-          npx electron-builder --${{ matrix.target }} --${{ matrix.arch }}
+          npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
 
-      - name: 5. 重命名 M 芯片及 Intel 芯片安装包
+      - name: 5. 重名 M 芯片及 Intel 芯片安装包
         if: matrix.target == 'mac'
         run: |
           cd dist
-          mv TeamsEcho-mac-${{ matrix.arch }}-v1.0.0.zip ${{ matrix.output_name }}
+          mv TeamsEcho-mac-${{ matrix.arch }}-v1.0.1.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1-${{ matrix.arch }}.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1.zip ${{ matrix.output_name }}
 
       - name: 6. 重命名 Windows 安装包
         if: matrix.target == 'win'
         shell: bash
         run: |
           cd dist
-          mv TeamsEcho-win-x64-v1.0.0.zip ${{ matrix.output_name }}
+          mv TeamsEcho-win-x64-v1.0.1.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1-x64.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1.zip ${{ matrix.output_name }}
 
       - name: 7. 生成 SHA-256 校验码 (macOS)
         if: matrix.target == 'mac'
@@ -100,15 +101,14 @@ jobs:
           mkdir release-dir
           find all-artifacts -type f -exec cp {} release-dir/ \;
           cd release-dir
-          echo "### TeamsEcho v1.0.0 SHA-256 Checksums" > csm-manifest.txt
+          echo "### TeamsEcho v1.0.1 SHA-256 Checksums" > csm-manifest.txt
           cat *.sha256 >> csm-manifest.txt
           rm *.sha256
 
       - name: 3. 发布到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release-dir/*
+          files: "release-dir/*"
           body_path: release-dir/csm-manifest.txt
           draft: false
           prerelease: false
