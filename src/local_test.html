@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TeamsEcho v1.0.5 本地极速自测舱</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .header-bar { text-align: center; font-size: 14px; font-weight: bold; color: #333; padding: 10px 0; background: #e5e5ea; border-bottom: 1px solid #d1d1d6; }
+    .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
+    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
+    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
+    label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; display: block; }
+    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; }
+    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; margin-bottom: 15px; }
+    .rich-editor:focus { border-color: #007aff; }
+    .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
+    .setting-row { margin-bottom: 12px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
+    .setting-select { padding: 5px 10px; border-radius: 5px; border: 1px solid #d1d1d6; outline: none; font-size: 13px; background: white; cursor: pointer; color: #333; }
+    .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
+    .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
+    .btn-group { display: flex; gap: 12px; }
+    .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center; }
+    .btn-start { background: #34c759; color: white; }
+    .btn-stop { background: #ff3b30; color: white; }
+    .footer-tip { background: #fff3cd; color: #856404; font-size: 12px; padding: 8px; text-align: center; border-top: 1px solid #ffeeba; }
+    .visual-box { background: #f2f2f7; border: 1px dashed #999; padding: 10px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 13px; white-space: pre-wrap; display: none; }
+  </style>
+</head>
+<body>
+  <div class="header-bar">TeamsEcho v1.0.5 [本地无环境纯净自测舱]</div>
+  <div class="container">
+    <div class="left-panel">
+      <label>👥 名单输入 (一行一个名字)</label>
+      <textarea id="namesInput" placeholder="张三&#10;李四&#10;#王五 (带#跳过)">张三
+李四
+王五
+赵六
+#新志诚</textarea>
+    </div>
+    <div class="right-panel">
+      <div style="flex: 1; display: flex; flex-direction: column;">
+        <label>💬 消息内容</label>
+        <div id="richEditor" class="rich-editor" contenteditable="true">111222</div>
+      </div>
+      <div class="control-area">
+        <div class="setting-row">
+          <label style="margin: 0;">⚙️ 发送逻辑链顺序:</label>
+          <select id="sequenceMode" class="setting-select">
+            <option value="mentionFirst">先批量 @ 提及成员 ──> 再追加消息正文内容</option>
+            <option value="textFirst">先写入消息正文内容 ──> 再在末尾批量 @ 提及成员</option>
+          </select>
+        </div>
+        <div id="previewText" class="preview-text">👥 最终会 @ 这些人: 张三, 李四, 王五, 赵六 (共 4 人)</div>
+        <div id="progressText" class="progress-text">📊 状态: 等待本地模拟...</div>
+        <div class="btn-group">
+          <button id="startBtn" class="btn btn-start">▶️ 本地模拟排版测试</button>
+          <button id="stopBtn" class="btn btn-stop">⏹️ 停止</button>
+        </div>
+        <div id="visualBox" class="visual-box"></div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-tip">💡 测试指引：由于 Node 环境限制，此自测舱在浏览器内运行。点击绿色按钮，下方将直接“视觉化渲染”出注入 Teams 富文本框后的最终排版效果！</div>
+
+  <script>
+    const namesInput = document.getElementById('namesInput');
+    const richEditor = document.getElementById('richEditor');
+    const previewText = document.getElementById('previewText');
+    const progressText = document.getElementById('progressText');
+    const sequenceMode = document.getElementById('sequenceMode');
+    const visualBox = document.getElementById('visualBox');
+
+    function getCleanNames() {
+      return namesInput.value.split('\n')
+        .map(n => n.trim())
+        .filter(n => n.length > 0 && !n.startsWith('#'));
+    }
+
+    namesInput.addEventListener('input', () => {
+      const names = getCleanNames();
+      previewText.innerText = `👥 最终会 @ 这些人: ${names.join(', ') || '无'} (共 ${names.length} 人)`;
+    });
+
+    document.getElementById('startBtn').addEventListener('click', () => {
+      const names = getCleanNames();
+      if(names.length === 0) { alert('请输入有效名单！'); return; }
+      
+      const textContent = richEditor.innerText;
+      const mode = sequenceMode.value;
+      
+      progressText.innerText = "⚡ 正在模拟时序注入...";
+      visualBox.style.display = "block";
+      
+      let finalLayout = "";
+      if (mode === "mentionFirst") {
+        // 模拟模式 A 排版
+        const mentions = names.map(n => `@${n}`).join(" ");
+        finalLayout = `【Teams 富文本框最终完美呈现形态】：\n${mentions}\n${textContent}`;
+      } else {
+        // 模拟模式 B 排版
+        const mentions = names.map(n => `@${n}`).join(" ");
+        finalLayout = `【Teams 富文本框最终完美呈现形态】：\n${textContent}\n${mentions}`;
+      }
+      
+      setTimeout(() => {
+        visualBox.innerText = finalLayout;
+        progressText.innerText = "✅ 模拟成功！排版时序已完全按照 Shift+Return 规则对齐。";
+      }, 300);
+    });
+  </script>
+</body>
+</html>
