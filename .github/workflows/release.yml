@@ -55,14 +55,20 @@ jobs:
         if: matrix.target == 'mac'
         run: |
           cd dist
-          mv TeamsEcho-mac-${{ matrix.arch }}-v1.0.1.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1-${{ matrix.arch }}.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1.zip ${{ matrix.output_name }}
+          # 动态匹配包含对应架构的zip文件进行强制重命名
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            mv *arm64*.zip ${{ matrix.output_name }} || mv *.zip ${{ matrix.output_name }}
+          else
+            mv *x64*.zip ${{ matrix.output_name }} || mv *.zip ${{ matrix.output_name }}
+          fi
 
       - name: 6. 重命名 Windows 安装包
         if: matrix.target == 'win'
         shell: bash
         run: |
           cd dist
-          mv TeamsEcho-win-x64-v1.0.1.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1-x64.zip ${{ matrix.output_name }} || mv TeamsEcho-1.0.1.zip ${{ matrix.output_name }}
+          # Windows 环境下直接强转唯一的 zip 包
+          mv *.zip ${{ matrix.output_name }}
 
       - name: 7. 生成 SHA-256 校验码 (macOS)
         if: matrix.target == 'mac'
