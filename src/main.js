@@ -164,7 +164,7 @@ ipcMain.on('trigger-safety-check', (event, data) => {
 
   safetyWindow = new BrowserWindow({
     width: 560,
-    height: 310,
+    height: 410,
     useContentSize: true,
     parent: mainWindow,
     modal: true,
