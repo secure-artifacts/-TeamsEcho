@@ -19,17 +19,17 @@ jobs:
           - os: macos-14
             arch: arm64
             target: mac
-            output_name: TeamsEcho-macos-v1.0.6.zip
+            output_name: TeamsEcho-macos-v1.0.8.zip
             
           - os: macos-14
             arch: x64
             target: mac
-            output_name: TeamsEcho-intel-v1.0.6.zip
+            output_name: TeamsEcho-intel-v1.0.8.zip
 
           - os: windows-latest
             arch: x64
             target: win
-            output_name: TeamsEcho-windows-v1.0.6.zip
+            output_name: TeamsEcho-windows-v1.0.8.zip
 
     steps:
       - name: 1. 检出源代码
@@ -105,7 +105,7 @@ jobs:
           mkdir release-dir
           find all-artifacts -type f -exec cp {} release-dir/ \;
           cd release-dir
-          echo "### TeamsEcho v1.0.6 SHA-256 Checksums" > csm-manifest.txt
+          echo "### TeamsEcho v1.0.8 SHA-256 Checksums" > csm-manifest.txt
           cat *.sha256 >> csm-manifest.txt
           rm *.sha256
 

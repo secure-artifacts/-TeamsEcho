@@ -16,7 +16,6 @@
     .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
     .setting-row { margin-bottom: 12px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
     .setting-select { padding: 5px 10px; border-radius: 5px; border: 1px solid #d1d1d6; outline: none; font-size: 13px; background: white; cursor: pointer; color: #333; font-weight: 500; }
-    .setting-select:focus { border-color: #007aff; }
     .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
     .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
     .btn-group { display: flex; gap: 12px; }
@@ -66,9 +65,7 @@
     try {
       const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
       document.title = `TeamsEcho v${packageJson.version}`;
-    } catch (e) {
-      document.title = `TeamsEcho`;
-    }
+    } catch (e) { document.title = `TeamsEcho`; }
 
     const namesInput = document.getElementById('namesInput');
     const richEditor = document.getElementById('richEditor');
@@ -93,16 +90,11 @@
       const htmlContent = richEditor.innerHTML;
       const textContent = richEditor.innerText;
       const mode = sequenceMode.value;
-      ipcRenderer.send('start-automation', { names, htmlContent, textContent, sequenceMode: mode });
+      ipcRenderer.send('trigger-safety-check', { names, htmlContent, textContent, sequenceMode: mode });
     });
 
-    document.getElementById('stopBtn').addEventListener('click', () => {
-      ipcRenderer.send('stop-automation');
-    });
-
-    ipcRenderer.on('status-update', (event, msg) => {
-      progressText.innerText = msg;
-    });
+    document.getElementById('stopBtn').addEventListener('click', () => { ipcRenderer.send('stop-automation'); });
+    ipcRenderer.on('status-update', (event, msg) => { progressText.innerText = msg; });
   </script>
 </body>
 </html>

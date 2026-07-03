@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>安全复核</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; box-sizing: border-box; padding: 20px; }
+    .modal-body { font-size: 24px; font-weight: 700; color: #d9383a; line-height: 1.6; background: #fff2f2; padding: 22px; border-radius: 10px; border: 1px solid #ffcccc; margin-bottom: 24px; text-align: center; width: 90%; }
+    .action-btn { padding: 12px 20px; border-radius: 6px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .row-actions { display: flex; gap: 20px; width: 95%; justify-content: space-between; margin-bottom: 20px; }
+    .btn-confirm { flex: 1; background: #34c759; color: white; }
+    .btn-confirm:hover { background: #28a745; }
+    .btn-switch { flex: 1; background: #e5e5ea; color: #1c1c1e; border: 1px solid #d1d1d6; }
+    .btn-switch:hover { background: #d1d1d6; }
+    .footer-action { text-align: center; border-top: 1px solid #e5e5ea; padding-top: 16px; width: 95%; }
+    .btn-cancel { width: 45%; background: #ff3b30; color: white; }
+    .btn-cancel:hover { background: #dc3545; }
+  </style>
+</head>
+<body>
+
+  <div class="modal-body">
+    💡 请核对：<br>
+    此时前台的 Teams 聊天框是否已经是带有格式工具栏的「富文本大框」？
+  </div>
+  
+  <div class="row-actions">
+    <button class="action-btn btn-confirm" id="confirmBtn" autofocus>
+      ✅ [ 是大框请发送 ]
+    </button>
+    <button class="action-btn btn-switch" id="switchBtn">
+      🔄 [ 一键切换大框 ]
+    </button>
+  </div>
+  
+  <div class="footer-action">
+    <button class="action-btn btn-cancel" id="cancelBtn">
+      ❌ [ 取消发送 ]
+    </button>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const confirmBtn = document.getElementById('confirmBtn');
+    const switchBtn = document.getElementById('switchBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    confirmBtn.focus();
+
+    confirmBtn.addEventListener('click', () => { ipcRenderer.send('safety-response', 'confirm'); });
+    switchBtn.addEventListener('click', () => { ipcRenderer.send('safety-response', 'switch'); });
+    cancelBtn.addEventListener('click', () => { ipcRenderer.send('safety-response', 'cancel'); });
+    
+    // 全局支持 Esc 键秒级终止退出
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { ipcRenderer.send('safety-response', 'cancel'); }
+    });
+  </script>
+</body>
+</html>

@@ -2,110 +2,104 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>TeamsEcho v1.0.5 本地极速自测舱</title>
+  <title>TeamsEcho 极致居中大字版自测舱</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-    .header-bar { text-align: center; font-size: 14px; font-weight: bold; color: #333; padding: 10px 0; background: #e5e5ea; border-bottom: 1px solid #d1d1d6; }
-    .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
-    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
-    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
+    .container { display: flex; flex: 1; padding: 15px; gap: 15px; filter: blur(2px); }
+    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; padding: 10px; opacity: 0.5; }
+    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; padding: 15px; justify-content: space-between; opacity: 0.5; }
     label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; display: block; }
-    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; }
-    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; margin-bottom: 15px; }
-    .rich-editor:focus { border-color: #007aff; }
-    .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
-    .setting-row { margin-bottom: 12px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
-    .setting-select { padding: 5px 10px; border-radius: 5px; border: 1px solid #d1d1d6; outline: none; font-size: 13px; background: white; cursor: pointer; color: #333; }
-    .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
-    .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
-    .btn-group { display: flex; gap: 12px; }
-    .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center; }
-    .btn-start { background: #34c759; color: white; }
-    .btn-stop { background: #ff3b30; color: white; }
-    .footer-tip { background: #fff3cd; color: #856404; font-size: 12px; padding: 8px; text-align: center; border-top: 1px solid #ffeeba; }
-    .visual-box { background: #f2f2f7; border: 1px dashed #999; padding: 10px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 13px; white-space: pre-wrap; display: none; }
+    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; }
+    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; background: #fff; margin-bottom: 15px; }
+    
+    /* 核心精简优化后的高级弹窗 */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+    .modal-box { width: 560px; background: #ffffff; border-radius: 14px; box-shadow: 0 12px 36px rgba(0,0,0,0.3); padding: 26px; box-sizing: border-box; }
+    
+    /* 极致放大、醒目、100% 居中的💡 警示核心区 */
+    .modal-body { font-size: 22px; font-weight: 700; color: #d9383a; line-height: 1.6; background: #fff2f2; padding: 22px; border-radius: 10px; border: 1px solid #ffcccc; margin-bottom: 24px; text-align: center; }
+    
+    /* 按钮基础样式：尺寸缩小、精细化 */
+    .action-btn { padding: 10px 16px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    
+    /* 第一层：左右并排 */
+    .row-actions { display: flex; gap: 14px; justify-content: space-between; margin-bottom: 16px; }
+    .btn-confirm { flex: 1; background: #34c759; color: white; }
+    .btn-confirm:hover { background: #28a745; }
+    .btn-switch { flex: 1; background: #e5e5ea; color: #1c1c1e; border: 1px solid #d1d1d6; }
+    .btn-switch:hover { background: #d1d1d6; }
+    
+    /* 第二层：底部独立居中取消 */
+    .footer-action { text-align: center; border-top: 1px solid #e5e5ea; padding-top: 14px; }
+    .btn-cancel { width: 40%; background: #ff3b30; color: white; }
+    .btn-cancel:hover { background: #dc3545; }
+    
+    /* 功能触发状态小字提示 */
+    .toast-indicator { text-align: center; font-size: 12px; font-weight: bold; color: #007aff; margin-top: 8px; min-height: 18px; }
   </style>
 </head>
 <body>
-  <div class="header-bar">TeamsEcho v1.0.5 [本地无环境纯净自测舱]</div>
-  <div class="container">
-    <div class="left-panel">
-      <label>👥 名单输入 (一行一个名字)</label>
-      <textarea id="namesInput" placeholder="张三&#10;李四&#10;#王五 (带#跳过)">张三
-李四
-王五
-赵六
-#新志诚</textarea>
-    </div>
-    <div class="right-panel">
-      <div style="flex: 1; display: flex; flex-direction: column;">
-        <label>💬 消息内容</label>
-        <div id="richEditor" class="rich-editor" contenteditable="true">111222</div>
+
+  <div class="modal-overlay" id="safetyModal">
+    <div class="modal-box">
+      <div class="modal-body">
+        💡 请核对：<br>
+        此时前台的 Teams 聊天框是否已经是带有格式工具栏的「富文本大框」？
       </div>
-      <div class="control-area">
-        <div class="setting-row">
-          <label style="margin: 0;">⚙️ 发送逻辑链顺序:</label>
-          <select id="sequenceMode" class="setting-select">
-            <option value="mentionFirst">先批量 @ 提及成员 ──> 再追加消息正文内容</option>
-            <option value="textFirst">先写入消息正文内容 ──> 再在末尾批量 @ 提及成员</option>
-          </select>
+      
+      <div class="modal-actions">
+        <div class="row-actions">
+          <button class="action-btn btn-confirm" id="confirmBtn" autofocus>
+            ✅ [ 是大框请发送 ]
+          </button>
+          <button class="action-btn btn-switch" id="switchBtn">
+            🔄 [ 一键切换大框 ]
+          </button>
         </div>
-        <div id="previewText" class="preview-text">👥 最终会 @ 这些人: 张三, 李四, 王五, 赵六 (共 4 人)</div>
-        <div id="progressText" class="progress-text">📊 状态: 等待本地模拟...</div>
-        <div class="btn-group">
-          <button id="startBtn" class="btn btn-start">▶️ 本地模拟排版测试</button>
-          <button id="stopBtn" class="btn btn-stop">⏹️ 停止</button>
+        
+        <div class="footer-action">
+          <button class="action-btn btn-cancel" id="cancelBtn">
+            ❌ [ 取消发送 ]
+          </button>
         </div>
-        <div id="visualBox" class="visual-box"></div>
+        
+        <div class="toast-indicator" id="toastIndicator"></div>
       </div>
     </div>
   </div>
-  <div class="footer-tip">💡 测试指引：由于 Node 环境限制，此自测舱在浏览器内运行。点击绿色按钮，下方将直接“视觉化渲染”出注入 Teams 富文本框后的最终排版效果！</div>
+
+  <div class="container">
+    <div class="left-panel"><label>👥 名单输入</label><textarea disabled></textarea></div>
+    <div class="right-panel"><div style="flex:1; display:flex; flex-direction:column;"><label>💬 消息内容</label><div class="rich-editor"></div></div></div>
+  </div>
 
   <script>
-    const namesInput = document.getElementById('namesInput');
-    const richEditor = document.getElementById('richEditor');
-    const previewText = document.getElementById('previewText');
-    const progressText = document.getElementById('progressText');
-    const sequenceMode = document.getElementById('sequenceMode');
-    const visualBox = document.getElementById('visualBox');
+    const confirmBtn = document.getElementById('confirmBtn');
+    const switchBtn = document.getElementById('switchBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const toast = document.getElementById('toastIndicator');
 
-    function getCleanNames() {
-      return namesInput.value.split('\n')
-        .map(n => n.trim())
-        .filter(n => n.length > 0 && !n.startsWith('#'));
-    }
+    // 默认聚焦绿色按钮，方便回车直发
+    confirmBtn.focus();
 
-    namesInput.addEventListener('input', () => {
-      const names = getCleanNames();
-      previewText.innerText = `👥 最终会 @ 这些人: ${names.join(', ') || '无'} (共 ${names.length} 人)`;
+    // 1. 真实发送功能模拟
+    confirmBtn.addEventListener('click', () => {
+      toast.style.color = '#34c759';
+      toast.innerText = '⚡️ 真实功能触发：弹窗正在关闭，极速动作链正在向 Teams 连续全自动贴人名...';
+      setTimeout(() => { window.close(); }, 1200);
     });
 
-    document.getElementById('startBtn').addEventListener('click', () => {
-      const names = getCleanNames();
-      if(names.length === 0) { alert('请输入有效名单！'); return; }
-      
-      const textContent = richEditor.innerText;
-      const mode = sequenceMode.value;
-      
-      progressText.innerText = "⚡ 正在模拟时序注入...";
-      visualBox.style.display = "block";
-      
-      let finalLayout = "";
-      if (mode === "mentionFirst") {
-        // 模拟模式 A 排版
-        const mentions = names.map(n => `@${n}`).join(" ");
-        finalLayout = `【Teams 富文本框最终完美呈现形态】：\n${mentions}\n${textContent}`;
-      } else {
-        // 模拟模式 B 排版
-        const mentions = names.map(n => `@${n}`).join(" ");
-        finalLayout = `【Teams 富文本框最终完美呈现形态】：\n${textContent}\n${mentions}`;
-      }
-      
-      setTimeout(() => {
-        visualBox.innerText = finalLayout;
-        progressText.innerText = "✅ 模拟成功！排版时序已完全按照 Shift+Return 规则对齐。";
-      }, 300);
+    // 2. 真实盲切功能模拟（保持弹窗不关闭）
+    switchBtn.addEventListener('click', () => {
+      toast.style.color = '#007aff';
+      toast.innerText = '⚙️ 真实功能触发：正在向后台发送 Cmd+Shift+X 模拟指令。弹窗保持锁定，请肉眼核对。';
+    });
+
+    // 3. 真实安全拦截模拟
+    cancelBtn.addEventListener('click', () => {
+      toast.style.color = '#ff3b30';
+      toast.innerText = '❌ 真实功能触发：已切断所有自动化进程，返回主界面。';
+      setTimeout(() => { window.close(); }, 1000);
     });
   </script>
 </body>
