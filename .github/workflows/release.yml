@@ -10,22 +10,24 @@ permissions:
 
 jobs:
   build:
-    name: Build for ${{ matrix.os }} (${{ matrix.arch }})
+    name: Build for ${{ matrix.target }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          # 1. 强力整合：用 macos-14 虚拟机一口气直接打出 M芯片版 和 Intel芯片版
           - os: macos-14
             arch: arm64
             target: mac
             output_name: TeamsEcho-macos-v1.0.1.zip
             
-          - os: macos-13
+          - os: macos-14
             arch: x64
             target: mac
             output_name: TeamsEcho-intel-v1.0.1.zip
 
+          # 2. Windows 平台
           - os: windows-latest
             arch: x64
             target: win
@@ -51,11 +53,10 @@ jobs:
         run: |
           npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
 
-      - name: 5. 重名 M 芯片及 Intel 芯片安装包
+      - name: 5. 重命名 macOS 安装包 (M芯片与Intel芯片)
         if: matrix.target == 'mac'
         run: |
           cd dist
-          # 动态匹配包含对应架构的zip文件进行强制重命名
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             mv *arm64*.zip ${{ matrix.output_name }} || mv *.zip ${{ matrix.output_name }}
           else
@@ -67,7 +68,6 @@ jobs:
         shell: bash
         run: |
           cd dist
-          # Windows 环境下直接强转唯一的 zip 包
           mv *.zip ${{ matrix.output_name }}
 
       - name: 7. 生成 SHA-256 校验码 (macOS)
