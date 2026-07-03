@@ -1,10 +1,10 @@
 {
   "name": "teamsecho",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Microsoft Teams 桌面自动化辅助工具",
   "main": "src/main.js",
-  "author": "Secure Artifacts",
-  "license": "MIT",
+  "author": "",
+  "license": "UNLICENSED",
   "scripts": {
     "start": "electron ."
   },
@@ -14,7 +14,7 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.secureartifacts.teamsecho",
+    "appId": "com.teamsecho.app",
     "productName": "TeamsEcho",
     "directories": {
       "output": "dist"

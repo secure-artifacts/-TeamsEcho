@@ -25,6 +25,11 @@
     .btn-stop { background: #ff3b30; color: white; }
     .btn-stop:hover { background: #dc3545; }
     .footer-tip { background: #fff3cd; color: #856404; font-size: 12px; padding: 8px; text-align: center; border-top: 1px solid #ffeeba; }
+    
+    /* 暂停恢复弹窗提示区 */
+    .pause-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 99999; }
+    .pause-box { width: 400px; background: white; border-radius: 10px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+    .pause-btn { margin-top: 15px; padding: 8px 20px; border: none; background: #007aff; color: white; border-radius: 5px; font-weight: bold; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -35,7 +40,7 @@
     </div>
     <div class="right-panel">
       <div class="editor-container">
-        <label>💬 消息内容 (支持直接输入或右键/快捷键粘贴富文本)</label>
+        <label>💬 消息内容</label>
         <div id="richEditor" class="rich-editor" contenteditable="true" placeholder="在此输入团队通知内容..."></div>
       </div>
       <div class="control-area">
@@ -55,23 +60,26 @@
       </div>
     </div>
   </div>
-  <div class="footer-tip">⚠️ 隐私保护安全提示：本软件完全在本地内存运行。关闭窗口或退出程序将彻底清空当前所有输入，绝不向云端传输或在本地留存任何草稿。</div>
+  <div class="footer-tip">⚠️ 隐私保护安全提示：本软件完全在本地内存运行。</div>
+
+  <!-- 前台切换暂停强制置顶弹窗 -->
+  <div id="pauseOverlay" class="pause-overlay">
+    <div class="pause-box">
+      <h3 style="color:#d9383a; margin-top:0;">⚠️ 自动化已安全暂停</h3>
+      <p id="pauseMsg" style="font-size:14px; color:#333; line-height:1.4;"></p>
+      <button id="resumeBtn" class="pause-btn">🔄 我已切回 Teams，继续</button>
+    </div>
+  </div>
 
   <script>
-    const { ipcRenderer } = require('electron');
-    const fs = require('fs');
-    const path = require('path');
-
-    try {
-      const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
-      document.title = `TeamsEcho v${packageJson.version}`;
-    } catch (e) { document.title = `TeamsEcho`; }
-
     const namesInput = document.getElementById('namesInput');
     const richEditor = document.getElementById('richEditor');
     const previewText = document.getElementById('previewText');
     const progressText = document.getElementById('progressText');
     const sequenceMode = document.getElementById('sequenceMode');
+    const pauseOverlay = document.getElementById('pauseOverlay');
+    const pauseMsg = document.getElementById('pauseMsg');
+    const resumeBtn = document.getElementById('resumeBtn');
 
     function getCleanNames() {
       return namesInput.value.split('\n')
@@ -84,17 +92,40 @@
       previewText.innerText = `👥 最终会 @ 这些人: ${names.join(', ') || '无'} (共 ${names.length} 人)`;
     });
 
+    // 桥接一：通过安全暴露的白名单 API 触发检查[cite: 3]
     document.getElementById('startBtn').addEventListener('click', () => {
       const names = getCleanNames();
       if(names.length === 0) { alert('请输入有效名单！'); return; }
-      const htmlContent = richEditor.innerHTML;
-      const textContent = richEditor.innerText;
-      const mode = sequenceMode.value;
-      ipcRenderer.send('trigger-safety-check', { names, htmlContent, textContent, sequenceMode: mode });
+      window.teamsEchoAPI.triggerSafetyCheck({
+        names,
+        htmlContent: richEditor.innerHTML,
+        textContent: richEditor.innerText,
+        sequenceMode: sequenceMode.value
+      });
     });
 
-    document.getElementById('stopBtn').addEventListener('click', () => { ipcRenderer.send('stop-automation'); });
-    ipcRenderer.on('status-update', (event, msg) => { progressText.innerText = msg; });
+    // 桥接二：通过安全白名单中断发送[cite: 3]
+    document.getElementById('stopBtn').addEventListener('click', () => {
+      window.teamsEchoAPI.stopAutomation();
+      pauseOverlay.style.display = 'none';
+    });
+
+    // 桥接三：白名单状态监听器注册[cite: 3]
+    window.teamsEchoAPI.onStatusUpdate((msg) => {
+      progressText.innerText = msg;
+    });
+
+    // 桥接四：前台走火挂起状态监听[cite: 3]
+    window.teamsEchoAPI.onForegroundLost((appName) => {
+      pauseMsg.innerHTML = `检测到前台窗口已被悄悄切走至：<br><b>「${appName}」</b><br><br>为防文本无缝走火喷涌，已为您挂起刹车。`;
+      pauseOverlay.style.display = 'flex';
+    });
+
+    // 桥接五：手动点击恢复发送[cite: 3]
+    resumeBtn.addEventListener('click', () => {
+      pauseOverlay.style.display = 'none';
+      window.teamsEchoAPI.resumeAfterForegroundLost();
+    });
   </script>
 </body>
 </html>

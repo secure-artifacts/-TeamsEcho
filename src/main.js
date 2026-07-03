@@ -5,6 +5,7 @@ const { exec } = require('child_process');
 let mainWindow;
 let safetyWindow;
 let isStopping = false;
+let isPausedForForeground = false;
 let currentAutomationData = null;
 
 function createWindow () {
@@ -12,7 +13,11 @@ function createWindow () {
     width: 900,
     height: 600,
     resizable: false,
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    }
   });
   mainWindow.loadFile('src/index.html');
   mainWindow.on('close', (e) => {
@@ -28,48 +33,99 @@ function createWindow () {
 
 app.whenReady().then(createWindow);
 
-// 【真实按键链模拟】Mac 与 Windows 独立分流处理器
+function getFrontmostAppName() {
+  return new Promise((resolve) => {
+    if (process.platform === 'darwin') {
+      const script = `tell application "System Events" to get name of first application process whose frontmost is true`;
+      exec(`osascript -e '${script}'`, (err, stdout) => {
+        resolve(err ? '' : stdout.trim());
+      });
+    } else {
+      const psCommand = `
+        Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public class Win32 {
+            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+          }
+"@;
+        $h = [Win32]::GetForegroundWindow();
+        $sb = New-Object System.Text.StringBuilder 256;
+        [Win32]::GetWindowText($h, $sb, 256) | Out-Null;
+        $sb.ToString()
+      `;
+      exec(`powershell -Command "${psCommand.replace(/\n/g, ' ')}"`, (err, stdout) => {
+        resolve(err ? '' : stdout.trim());
+      });
+    }
+  });
+}
+
+function isForegroundTeams(name) {
+  if (!name) return false;
+  return /teams/i.test(name);
+}
+
+async function ensureForegroundOrPause() {
+  const name = await getFrontmostAppName();
+  if (isForegroundTeams(name)) return true;
+
+  isPausedForForeground = true;
+  mainWindow.webContents.send('foreground-lost', name || '未知窗口');
+  mainWindow.webContents.send('status-update', `⏸️ 检测到前台已切换到「${name || '未知窗口'}」，自动化已暂停，等待确认后继续。`);
+
+  await new Promise((resolve) => {
+    const onResume = () => {
+      ipcMain.removeListener('resume-after-foreground-lost', onResume);
+      resolve();
+    };
+    ipcMain.on('resume-after-foreground-lost', onResume);
+  });
+  isPausedForForeground = false;
+  return !isStopping;
+}
+
 function runPlatformKeystrokeForPerson(name) {
   return new Promise((resolve) => {
     clipboard.writeText(name);
-    
+
     if (process.platform === 'darwin') {
-      // Mac 底层 AppleScript 极速纯净动作闭环：@ -> 向左 -> 粘贴 -> 1 -> 退格 -> 回车锁定
       const script = `
         tell application "Microsoft Teams" to activate
-        delay 0.04
+        delay 0.06
         tell application "System Events"
           keystroke "@"
-          delay 0.04
+          delay 0.06
           key code 123
-          delay 0.04
+          delay 0.06
           keystroke "v" using command down
-          delay 0.08
+          delay 0.15
           keystroke "1"
-          delay 0.04
+          delay 0.06
           key code 51
           delay 0.18
           key code 36
-          delay 0.04
+          delay 0.06
         end tell
       `;
       exec(`osascript -e '${script}'`, () => resolve());
     } else {
-      // Windows 底层 PowerShell Wscript.Shell 极致对齐底层按键流
       const psCommand = `
         $wshell = New-Object -ComObject Wscript.Shell;
         [void]$wshell.AppActivate("Teams");
-        Start-Sleep -m 50;
+        Start-Sleep -m 60;
         $wshell.SendKeys("@");
-        Start-Sleep -m 40;
+        Start-Sleep -m 60;
         $wshell.SendKeys("{LEFT}");
-        Start-Sleep -m 40;
+        Start-Sleep -m 60;
         $wshell.SendKeys("^v");
-        Start-Sleep -m 80;
-        $wshell.SendKeys("1");
-        Start-Sleep -m 40;
-        $wshell.SendKeys("{BACKSPACE}");
         Start-Sleep -m 150;
+        $wshell.SendKeys("1");
+        Start-Sleep -m 60;
+        $wshell.SendKeys("{BACKSPACE}");
+        Start-Sleep -m 180;
         $wshell.SendKeys("{ENTER}");
       `;
       exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`, () => resolve());
@@ -77,10 +133,9 @@ function runPlatformKeystrokeForPerson(name) {
   });
 }
 
-// 真实注入换行及最终文本
 function pasteRichContent() {
   return new Promise((resolve) => {
-    const cmd = process.platform === 'darwin' 
+    const cmd = process.platform === 'darwin'
       ? `osascript -e 'tell application "System Events" to keystroke "v" using command down'`
       : `powershell -Command "$w = New-Object -ComObject Wscript.Shell; [void]$w.AppActivate('Teams'); $w.SendKeys('^v')"`;
     exec(cmd, () => resolve());
@@ -96,11 +151,9 @@ function safeLineBreak() {
   });
 }
 
-// 唤醒前台并接收安全审查请求
 ipcMain.on('trigger-safety-check', (event, data) => {
   currentAutomationData = data;
-  
-  // 先把 Teams 强制推到用户眼前，供眼球物理扫描核对
+
   if (process.platform === 'darwin') {
     exec('osascript -e \'tell application "Microsoft Teams" to activate\'');
   } else {
@@ -109,24 +162,27 @@ ipcMain.on('trigger-safety-check', (event, data) => {
 
   if (safetyWindow) { safetyWindow.focus(); return; }
 
-  // 创建一个完全独立置顶、无边框干扰、完美还原设计稿的置顶安全核对舱
   safetyWindow = new BrowserWindow({
-    width: 580,
-    height: 320,
+    width: 560,
+    height: 310,
+    useContentSize: true,
     parent: mainWindow,
     modal: true,
     alwaysOnTop: true,
     resizable: false,
     frame: true,
     title: "安全核对栏",
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    }
   });
 
   safetyWindow.loadFile('src/safety.html');
   safetyWindow.on('closed', () => { safetyWindow = null; });
 });
 
-// 处理三大功能按键的真实业务闭环
 ipcMain.on('safety-response', async (event, responseType) => {
   if (responseType === 'cancel') {
     if (safetyWindow) safetyWindow.close();
@@ -135,18 +191,28 @@ ipcMain.on('safety-response', async (event, responseType) => {
   }
 
   if (responseType === 'switch') {
-    // 真实盲切功能触发（跨平台适配：Mac 为 Cmd+Shift+X，Windows 为 Ctrl+Shift+X）
     if (process.platform === 'darwin') {
-      exec(`osascript -e 'tell application "System Events" to keystroke "x" using {command down, shift down}'`);
+      const script = `
+        tell application "Microsoft Teams" to activate
+        delay 0.08
+        tell application "System Events"
+          keystroke "x" using {command down, shift down}
+        end tell
+      `;
+      exec(`osascript -e '${script}'`);
     } else {
-      exec(`powershell -Command "$w = New-Object -ComObject Wscript.Shell; [void]$w.AppActivate('Teams'); $w.SendKeys('^+X')"`);
+      const psCommand = `
+        $w = New-Object -ComObject Wscript.Shell;
+        [void]$w.AppActivate('Teams');
+        Start-Sleep -m 80;
+        $w.SendKeys('^+x')
+      `;
+      exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`);
     }
-    // 弹窗本身雷打不动，保持锁定，静待用户二次复核
     return;
   }
 
   if (responseType === 'confirm') {
-    // 真实全速发射功能触发
     if (safetyWindow) safetyWindow.close();
     if (!currentAutomationData) return;
 
@@ -154,42 +220,60 @@ ipcMain.on('safety-response', async (event, responseType) => {
     isStopping = false;
     const originalClipboard = clipboard.readText();
 
-    mainWindow.webContents.send('status-update', '🚀 轰鸣！自动化全速发射，动作链正在无缝滚动注入...');
+    mainWindow.webContents.send('status-update', '🚀 自动化开始执行...');
+
+    const runMentionPass = async () => {
+      for (let i = 0; i < names.length; i++) {
+        if (isStopping) break;
+        const ok = await ensureForegroundOrPause();
+        if (!ok) break;
+        mainWindow.webContents.send('status-update', `📈 正在粘贴提及：${names[i]} (${i + 1}/${names.length})`);
+        await runPlatformKeystrokeForPerson(names[i]);
+      }
+    };
 
     if (sequenceMode === 'mentionFirst') {
-      for (let i = 0; i < names.length; i++) {
-        if (isStopping) break;
-        mainWindow.webContents.send('status-update', `📈 [极速版] 正在连续粘贴提及：${names[i]} (${i+1}/${names.length})`);
-        await runPlatformKeystrokeForPerson(names[i]);
-      }
+      await runMentionPass();
       if (!isStopping) {
-        await safeLineBreak();
-        await new Promise(res => setTimeout(res, 100));
-        clipboard.write({ html: htmlContent, text: textContent });
-        await pasteRichContent();
+        const ok = await ensureForegroundOrPause();
+        if (ok) {
+          await safeLineBreak();
+          await new Promise(res => setTimeout(res, 150));
+          const okBeforePaste = await ensureForegroundOrPause();
+          if (okBeforePaste) {
+            clipboard.write({ html: htmlContent, text: textContent });
+            await pasteRichContent();
+          }
+        }
       }
     } else {
-      mainWindow.webContents.send('status-update', '🔗 正在首发注入消息正文内容...');
-      clipboard.write({ html: htmlContent, text: textContent });
-      await pasteRichContent();
-      
-      await safeLineBreak();
-      await new Promise(res => setTimeout(res, 100));
+      mainWindow.webContents.send('status-update', '🔗 正在注入消息正文内容...');
+      const okBeforeBody = await ensureForegroundOrPause();
+      if (okBeforeBody) {
+        clipboard.write({ html: htmlContent, text: textContent });
+        await pasteRichContent();
 
-      for (let i = 0; i < names.length; i++) {
-        if (isStopping) break;
-        mainWindow.webContents.send('status-update', `📈 [极速版] 正在追加粘贴提及：${names[i]} (${i+1}/${names.length})`);
-        await runPlatformKeystrokeForPerson(names[i]);
+        const okBeforeBreak = await ensureForegroundOrPause();
+        if (okBeforeBreak) {
+          await safeLineBreak();
+          await new Promise(res => setTimeout(res, 150));
+          await runMentionPass();
+        }
       }
     }
 
     if (isStopping) {
       mainWindow.webContents.send('status-update', '⏹️ 自动化已被中途按键强行安全切断。');
     } else {
-      mainWindow.webContents.send('status-update', '✅ 极速全自动注入已完美交付！');
+      mainWindow.webContents.send('status-update', '✅ 自动化执行完毕。');
     }
     setTimeout(() => { clipboard.writeText(originalClipboard); }, 500);
   }
 });
 
-ipcMain.on('stop-automation', () => { isStopping = true; });
+ipcMain.on('stop-automation', () => {
+  isStopping = true;
+  if (isPausedForForeground) {
+    ipcMain.emit('resume-after-foreground-lost');
+  }
+});
