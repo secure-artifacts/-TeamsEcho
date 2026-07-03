@@ -1,6 +1,6 @@
 {
   "name": "teamsecho",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Microsoft Teams 桌面自动化辅助工具",
   "main": "src/main.js",
   "author": "Secure Artifacts",
@@ -21,10 +21,12 @@
     },
     "mac": {
       "target": ["zip"],
-      "identity": null
+      "identity": null,
+      "icon": "build/icon.png"
     },
     "win": {
-      "target": ["zip"]
+      "target": ["zip"],
+      "icon": "build/icon.png"
     },
     "asar": true
   }
