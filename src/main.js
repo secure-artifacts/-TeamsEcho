@@ -33,10 +33,9 @@ function createWindow () {
 
 app.whenReady().then(createWindow);
 
-// 核心调优的单人提及 AppleScript 流
 function runAppleScriptForPerson(name) {
   return new Promise((resolve) => {
-    // 严格动作链：输入@ -> 左移光标 -> 粘贴完整名字 -> 输入1触发模糊联想 -> 退格删除1 -> 回车确认
+    clipboard.writeText(name);
     const script = `
       tell application "Microsoft Teams" to activate
       delay 0.05
@@ -46,21 +45,19 @@ function runAppleScriptForPerson(name) {
         key code 123
         delay 0.05
         keystroke "v" using command down
-        delay 0.15
+        delay 0.1
         keystroke "1"
         delay 0.05
         key code 51
         delay 0.2
         key code 36
-        delay 0.1
+        delay 0.05
       end tell
     `;
-    clipboard.writeText(name);
     exec(`osascript -e '${script}'`, (err) => { resolve(err ? false : true); });
   });
 }
 
-// 粘贴富文本内容
 function pasteRichContent(html, text) {
   return new Promise((resolve) => {
     clipboard.write({ html: html, text: text });
@@ -76,13 +73,6 @@ function pasteRichContent(html, text) {
   });
 }
 
-// 模拟原生按键
-function sendNativeKey(keyCode) {
-  return new Promise((resolve) => {
-    exec(`osascript -e 'tell application "System Events" to key code ${keyCode}'`, () => { resolve(); });
-  });
-}
-
 ipcMain.on('start-automation', async (event, data) => {
   const { names, htmlContent, textContent, sequenceMode } = data;
   isStopping = false;
@@ -94,54 +84,43 @@ ipcMain.on('start-automation', async (event, data) => {
       return;
     }
 
-    event.reply('status-update', '🛡️ 安全机制：正在强制 Teams 开启富文本长文模式...');
-    exec(`osascript -e 'tell application "System Events" to keystroke "x" using {command down, shift down}'`);
-    await new Promise(res => setTimeout(res, 400));
+    event.reply('status-update', '🛡️ 安全锁机制：正在强制 Teams 锁死在富文本编辑状态...');
+    clipboard.write({ html: '<div style="display:inline-block;"></div>' });
+    await new Promise((res) => {
+      exec(`osascript -e 'tell application "System Events" to keystroke "v" using command down'`, () => res());
+    });
+    await new Promise(res => setTimeout(res, 300));
 
-    // 分支判定：先 @ 还是先发正文
     if (sequenceMode === 'mentionFirst') {
-      // 模式 A：先批量 @ 提及成员 ──> 再追加消息正文内容
       for (let i = 0; i < names.length; i++) {
         if (isStopping) break;
-        event.reply('status-update', `📈 [先@后文] 正在 @ 第 ${i + 1}/${names.length} 位：${names[i]}`);
+        event.reply('status-update', `📈 [极速版] 正在粘贴提及第 ${i + 1}/${names.length} 位：${names[i]}`);
         await runAppleScriptForPerson(names[i]);
-        
-        // 每 @ 完一个人，输入一个空格并稍微等待，确保蓝字气泡完全闭环且相互独立
-        await new Promise((res) => {
-          exec(`osascript -e 'tell application "System Events" to keystroke " "'`, () => setTimeout(res, 100));
-        });
       }
       if (!isStopping) {
-        // @ 完所有人后，按 Shift+Return 实现优雅的富文本内换行
         exec(`osascript -e 'tell application "System Events" to keystroke return using shift down'`);
-        await new Promise(res => setTimeout(res, 200));
-        
+        await new Promise(res => setTimeout(res, 150));
         event.reply('status-update', '🔗 正在追加正文内容...');
         await pasteRichContent(htmlContent, textContent);
       }
     } else {
-      // 模式 B：先写入消息正文内容 ──> 再在末尾批量 @ 提及成员
       event.reply('status-update', '🔗 正在首发注入消息正文内容...');
       await pasteRichContent(htmlContent, textContent);
       
-      // 正文结束后，按 Shift+Return 换行，准备在下方追加 @ 名单
       exec(`osascript -e 'tell application "System Events" to keystroke return using shift down'`);
-      await new Promise(res => setTimeout(res, 200));
+      await new Promise(res => setTimeout(res, 150));
 
       for (let i = 0; i < names.length; i++) {
         if (isStopping) break;
-        event.reply('status-update', `📈 [先文后@] 正在追加 @ 第 ${i + 1}/${names.length} 位：${names[i]}`);
+        event.reply('status-update', `📈 [极速版] 正在追加提及第 ${i + 1}/${names.length} 位：${names[i]}`);
         await runAppleScriptForPerson(names[i]);
-        await new Promise((res) => {
-          exec(`osascript -e 'tell application "System Events" to keystroke " "'`, () => setTimeout(res, 100));
-        });
       }
     }
 
     if (isStopping) {
       event.reply('status-update', '⏹️ 自动化已被安全中断。');
     } else {
-      event.reply('status-update', '✅ 全流程自动化 client 级注入已完美交付！');
+      event.reply('status-update', '✅ 终极无空格高并发注入已完美交付！');
     }
     setTimeout(() => { clipboard.writeText(originalClipboard); }, 500);
   });
