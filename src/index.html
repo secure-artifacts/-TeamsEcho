@@ -2,9 +2,10 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>TeamsEcho v1.0.0</title>
+  <title>TeamsEcho</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .header-bar { text-align: center; font-size: 14px; font-weight: bold; color: #333; padding: 10px 0; background: #f5f5f7; border-bottom: 1px solid #e5e5ea; }
     .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
     .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
     .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
@@ -29,6 +30,7 @@
   </style>
 </head>
 <body>
+  <div id="uiHeaderTitle" class="header-bar">TeamsEcho Loading...</div>
   <div class="container">
     <div class="left-panel">
       <label>👥 名单输入 (一行一个名字)</label>
@@ -57,8 +59,18 @@
 
   <script>
     const { ipcRenderer } = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+      const currentVersion = packageJson.version;
+      document.getElementById('uiHeaderTitle').innerText = `TeamsEcho v${currentVersion}`;
+      document.title = `TeamsEcho v${currentVersion}`;
+    } catch (e) {
+      document.getElementById('uiHeaderTitle').innerText = `TeamsEcho`;
+    }
     
-    // 基础表格模板插入
     function insertBasicTable() {
       const tableHtml = `<table border="1" style="border-collapse: collapse; width: 100%;"><tr><th>项目</th><th>进度</th></tr><tr><td>任务A</td><td>已完成</td></tr></table><br>`;
       document.execCommand('insertHTML', false, tableHtml);
@@ -75,7 +87,6 @@
         .filter(n => n.length > 0 && !n.startsWith('#'));
     }
 
-    // 实时名单解析预览
     namesInput.addEventListener('input', () => {
       const names = getCleanNames();
       previewText.innerText = `👥 最终会 @ 这些人: ${names.join(', ') || '无'} (共 ${names.length} 人)`;

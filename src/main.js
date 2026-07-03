@@ -18,7 +18,6 @@ function createWindow () {
 
   mainWindow.loadFile('src/index.html');
 
-  // 安全护栏：强拦截关闭窗口行为，不留持久化痕迹
   mainWindow.on('close', (e) => {
     const choice = dialog.showMessageBoxSync(mainWindow, {
       type: 'question',
@@ -37,10 +36,9 @@ app.whenReady().then(createWindow);
 // 基于用户 M 芯片参数深度调优的 AppleScript 桥接执行
 function runAppleScriptForPerson(name) {
   return new Promise((resolve) => {
-    // 精确映射极速版执行链：@ -> 左键 -> 粘贴名字 -> 按1 -> 删除 -> 回车
     const script = `
       tell application "Microsoft Teams" to activate
-      delay 0.1
+      delay 0.05
       tell application "System Events"
         keystroke "@"
         delay 0.05
@@ -83,13 +81,29 @@ ipcMain.on('start-automation', async (event, data) => {
   isStopping = false;
   const originalClipboard = clipboard.readText();
 
-  // 运行前前台校验流，前置激活 Teams 窗口
+  // 1. 前置激活 Teams 窗口
   exec('osascript -e \'tell application "Microsoft Teams" to activate\'', async (err) => {
     if (err) {
       event.reply('status-update', '❌ 错误: 未能在系统中检测到 Microsoft Teams 客户端！');
       return;
     }
 
+    event.reply('status-update', '🛡️ 安全机制：正在强制 Teams 开启富文本长文模式...');
+    
+    // 【核心新增安全锁】：模拟按下 Cmd+Shift+X 强制开启 Teams 富文本框
+    await new Promise((res) => {
+      const forceRichScript = `
+        tell application "System Events"
+          keystroke "x" using {command down, shift down}
+        end tell
+      `;
+      exec(`osascript -e '${forceRichScript}'`, () => res());
+    });
+    
+    // 稍作呼吸停顿，确保 Teams 框完全展开
+    await new Promise(res => setTimeout(res, 300));
+
+    // 2. 开始循环模拟 @ 提及
     for (let i = 0; i < names.length; i++) {
       if (isStopping) {
         event.reply('status-update', '⏹️ 自动化已被中断，当前已安全停止。');
@@ -99,14 +113,18 @@ ipcMain.on('start-automation', async (event, data) => {
 
       event.reply('status-update', `📈 正在 @ 第 ${i + 1}/${names.length} 位成员：${names[i]}`);
       await runAppleScriptForPerson(names[i]);
+      
+      // 在富文本模式下，每 @ 完一个人，自动敲一个空格作为间隔，更加美观规范
+      await new Promise((res) => {
+        exec(`osascript -e 'tell application "System Events" to keystroke " "'`, () => res());
+      });
     }
 
-    // 所有人员 @ 提及完毕后，把带有富文本格式和链接的消息体直接一次性灌入 Teams 输入框中
+    // 3. 所有人员 @ 提及完毕后，灌入消息正文
     event.reply('status-update', '🔗 正在注入带格式的消息正文...');
     pasteRichContent(htmlContent, textContent);
     event.reply('status-update', '✅ 批量 @ 提及与富文本消息注入已全部完美完成！');
     
-    // 彻底销毁敏感剪贴板缓存，保障隐私
     setTimeout(() => { clipboard.writeText(originalClipboard); }, 500);
   });
 });
