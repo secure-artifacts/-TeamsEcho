@@ -133,21 +133,49 @@ function runPlatformKeystrokeForPerson(name) {
   });
 }
 
+// 修复点：粘贴正文前必须先主动 activate Teams，否则一旦焦点残留在
+// TeamsEcho 自身窗口（例如刚关闭"安全核对栏"弹窗之后），Cmd+V 会粘贴到
+// 错误的地方，导致"先发文本再@人"时文本消失不见。
 function pasteRichContent() {
   return new Promise((resolve) => {
-    const cmd = process.platform === 'darwin'
-      ? `osascript -e 'tell application "System Events" to keystroke "v" using command down'`
-      : `powershell -Command "$w = New-Object -ComObject Wscript.Shell; [void]$w.AppActivate('Teams'); $w.SendKeys('^v')"`;
-    exec(cmd, () => resolve());
+    if (process.platform === 'darwin') {
+      const script = `
+        tell application "Microsoft Teams" to activate
+        delay 0.15
+        tell application "System Events" to keystroke "v" using command down
+      `;
+      exec(`osascript -e '${script}'`, () => resolve());
+    } else {
+      const psCommand = `
+        $w = New-Object -ComObject Wscript.Shell;
+        [void]$w.AppActivate('Teams');
+        Start-Sleep -m 150;
+        $w.SendKeys('^v')
+      `;
+      exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`, () => resolve());
+    }
   });
 }
 
+// 修复点：与 pasteRichContent 同理，换行前也要先把 Teams 拉回前台。
 function safeLineBreak() {
   return new Promise((resolve) => {
-    const cmd = process.platform === 'darwin'
-      ? `osascript -e 'tell application "System Events" to keystroke return using shift down'`
-      : `powershell -Command "$w = New-Object -ComObject Wscript.Shell; [void]$w.AppActivate('Teams'); $w.SendKeys('+{ENTER}')"`;
-    exec(cmd, () => resolve());
+    if (process.platform === 'darwin') {
+      const script = `
+        tell application "Microsoft Teams" to activate
+        delay 0.1
+        tell application "System Events" to keystroke return using shift down
+      `;
+      exec(`osascript -e '${script}'`, () => resolve());
+    } else {
+      const psCommand = `
+        $w = New-Object -ComObject Wscript.Shell;
+        [void]$w.AppActivate('Teams');
+        Start-Sleep -m 100;
+        $w.SendKeys('+{ENTER}')
+      `;
+      exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`, () => resolve());
+    }
   });
 }
 
@@ -232,9 +260,13 @@ ipcMain.on('safety-response', async (event, responseType) => {
       }
     };
 
+    // 是否有实际正文内容（去除首尾空白后非空）。
+    const hasContent = !!(textContent && textContent.trim().length > 0);
+
     if (sequenceMode === 'mentionFirst') {
+      // ===== 模式 A：先 @ 人，后追加正文 =====
       await runMentionPass();
-      if (!isStopping) {
+      if (!isStopping && hasContent) {
         const ok = await ensureForegroundOrPause();
         if (ok) {
           await safeLineBreak();
@@ -247,18 +279,25 @@ ipcMain.on('safety-response', async (event, responseType) => {
         }
       }
     } else {
-      mainWindow.webContents.send('status-update', '🔗 正在注入消息正文内容...');
-      const okBeforeBody = await ensureForegroundOrPause();
-      if (okBeforeBody) {
-        clipboard.write({ html: htmlContent, text: textContent });
-        await pasteRichContent();
+      // ===== 模式 B：先输入文本，后 @ 人 =====
+      if (hasContent) {
+        mainWindow.webContents.send('status-update', '🔗 正在注入消息正文内容...');
+        const okBeforeBody = await ensureForegroundOrPause();
+        if (okBeforeBody) {
+          clipboard.write({ html: htmlContent, text: textContent });
+          await pasteRichContent();
 
-        const okBeforeBreak = await ensureForegroundOrPause();
-        if (okBeforeBreak) {
-          await safeLineBreak();
-          await new Promise(res => setTimeout(res, 150));
-          await runMentionPass();
+          const okBeforeBreak = await ensureForegroundOrPause();
+          if (okBeforeBreak) {
+            await safeLineBreak();
+            await new Promise(res => setTimeout(res, 150));
+            await runMentionPass();
+          }
         }
+      } else {
+        // 正文为空/纯空白：跳过粘贴与换行，直接进入 @ 人流程，避免污染输入框。
+        mainWindow.webContents.send('status-update', '⚠️ 未检测到有效正文内容，跳过粘贴步骤，直接开始 @ 提及...');
+        await runMentionPass();
       }
     }
 
