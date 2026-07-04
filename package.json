@@ -9,8 +9,8 @@
     "start": "electron ."
   },
   "devDependencies": {
-    "electron": "^30.5.1",
-    "electron-builder": "^24.13.3"
+    "electron": "^42.5.2",
+    "electron-builder": "^26.0.0"
   },
   "build": {
     "appId": "com.teamsecho.app",
@@ -32,5 +32,8 @@
       "icon": "build/icon.png"
     },
     "asar": true
+  },
+  "overrides": {
+    "tar": "^7.5.11"
   }
 }
