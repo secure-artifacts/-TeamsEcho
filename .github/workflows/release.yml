@@ -1,3 +1,8 @@
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
+
 name: Secure Release Compiler
 
 on:
@@ -8,6 +13,18 @@ on:
 jobs:
   build:
     name: Build for ${{ matrix.target }} (${{ matrix.arch }})
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            target: mac
+            output_name: TeamsEcho-macos-v1.1.3.zip
+            
           - os: macos-14
             arch: x64
             target: mac
@@ -60,6 +77,10 @@ jobs:
           cd dist
           shasum -a 256 ${{ matrix.output_name }} > ${{ matrix.output_name }}.sha256
 
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/TeamsEcho-*.zip"
       - name: 8. 生成 SHA-256 校验码 (Windows)
         if: matrix.target == 'win'
         shell: bash
@@ -67,10 +88,6 @@ jobs:
           cd dist
           sha256sum ${{ matrix.output_name }} > ${{ matrix.output_name }}.sha256
 
-      - name: Attest Build Provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: "dist/TeamsEcho-*.zip"
       - name: 9. 暂存编译产物
         uses: actions/upload-artifact@v4
         with:
@@ -83,6 +100,15 @@ jobs:
   publish:
     name: Public Secure Release Artifacts
     needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 下载所有二进制包
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
       - name: 2. 汇总发布清单
         run: |
           mkdir release-dir
