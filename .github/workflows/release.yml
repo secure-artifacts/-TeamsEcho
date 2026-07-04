@@ -18,18 +18,15 @@ jobs:
           - os: macos-14
             arch: arm64
             target: mac
-            output_name: TeamsEcho-macos-v1.1.5.zip
-            
+            output_prefix: TeamsEcho-macos
           - os: macos-14
             arch: x64
             target: mac
-            output_name: TeamsEcho-intel-v1.1.5.zip
-
+            output_prefix: TeamsEcho-intel
           - os: windows-latest
             arch: x64
             target: win
-            output_name: TeamsEcho-windows-v1.1.5.zip
-
+            output_prefix: TeamsEcho-windows
     steps:
       - name: 1. 检出源代码
         uses: actions/checkout@v4
@@ -49,43 +46,48 @@ jobs:
         run: |
           npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
 
-      - name: 5. 重命名 macOS 安装包
+      - name: 5. 生成输出文件名 (版本号取自触发 tag，无需手动改动)
+        id: name
+        shell: bash
+        run: echo "output_name=${{ matrix.output_prefix }}-${{ github.ref_name }}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: 6. 重命名 macOS 安装包
         if: matrix.target == 'mac'
         run: |
           cd dist
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            mv *arm64*.zip ${{ matrix.output_name }} || mv *.zip ${{ matrix.output_name }}
+            mv *arm64*.zip "${{ steps.name.outputs.output_name }}" || mv *.zip "${{ steps.name.outputs.output_name }}"
           else
-            mv *x64*.zip ${{ matrix.output_name }} || mv *.zip ${{ matrix.output_name }}
+            mv *x64*.zip "${{ steps.name.outputs.output_name }}" || mv *.zip "${{ steps.name.outputs.output_name }}"
           fi
 
-      - name: 6. 重命名 Windows 安装包
+      - name: 7. 重命名 Windows 安装包
         if: matrix.target == 'win'
         shell: bash
         run: |
           cd dist
-          mv *.zip ${{ matrix.output_name }}
+          mv *.zip "${{ steps.name.outputs.output_name }}"
 
-      - name: 7. 生成 SHA-256 校验码 (macOS)
+      - name: 8. 生成 SHA-256 校验码 (macOS)
         if: matrix.target == 'mac'
         run: |
           cd dist
-          shasum -a 256 ${{ matrix.output_name }} > ${{ matrix.output_name }}.sha256
+          shasum -a 256 "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
 
-      - name: 8. 生成 SHA-256 校验码 (Windows)
+      - name: 9. 生成 SHA-256 校验码 (Windows)
         if: matrix.target == 'win'
         shell: bash
         run: |
           cd dist
-          sha256sum ${{ matrix.output_name }} > ${{ matrix.output_name }}.sha256
+          sha256sum "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
 
-      - name: 9. 暂存编译产物
+      - name: 10. 暂存编译产物
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.arch }}-${{ matrix.target }}
           path: |
-            dist/${{ matrix.output_name }}
-            dist/${{ matrix.output_name }}.sha256
+            dist/${{ steps.name.outputs.output_name }}
+            dist/${{ steps.name.outputs.output_name }}.sha256
           retention-days: 1
 
   publish:
@@ -107,7 +109,7 @@ jobs:
           mkdir release-dir
           find all-artifacts -type f -exec cp {} release-dir/ \;
           cd release-dir
-          echo "### TeamsEcho v1.1.5 SHA-256 Checksums" > csm-manifest.txt
+          echo "### TeamsEcho ${{ github.ref_name }} SHA-256 Checksums" > csm-manifest.txt
           cat *.sha256 >> csm-manifest.txt
           rm *.sha256
 
