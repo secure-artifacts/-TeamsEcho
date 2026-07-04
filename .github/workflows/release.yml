@@ -18,17 +18,17 @@ jobs:
           - os: macos-14
             arch: arm64
             target: mac
-            output_name: TeamsEcho-macos-v1.1.1.zip
+            output_name: TeamsEcho-macos-v1.1.5.zip
             
           - os: macos-14
             arch: x64
             target: mac
-            output_name: TeamsEcho-intel-v1.1.1.zip
+            output_name: TeamsEcho-intel-v1.1.5.zip
 
           - os: windows-latest
             arch: x64
             target: win
-            output_name: TeamsEcho-windows-v1.1.1.zip
+            output_name: TeamsEcho-windows-v1.1.5.zip
 
     steps:
       - name: 1. 检出源代码
@@ -93,6 +93,8 @@ jobs:
     needs: build
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
     steps:
       - name: 1. 下载所有二进制包
@@ -105,11 +107,16 @@ jobs:
           mkdir release-dir
           find all-artifacts -type f -exec cp {} release-dir/ \;
           cd release-dir
-          echo "### TeamsEcho v1.1.1 SHA-256 Checksums" > csm-manifest.txt
+          echo "### TeamsEcho v1.1.5 SHA-256 Checksums" > csm-manifest.txt
           cat *.sha256 >> csm-manifest.txt
           rm *.sha256
 
-      - name: 3. 发布到 GitHub Releases
+      - name: 3. 生成构件证明 (SLSA Provenance)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "release-dir/*.zip"
+
+      - name: 4. 发布到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           files: "release-dir/*"
