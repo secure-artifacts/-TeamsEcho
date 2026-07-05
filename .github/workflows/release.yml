@@ -40,18 +40,24 @@ jobs:
       - name: 3. 安装依赖
         run: npm ci
 
-      - name: 4. 执行自动化编译 (沙箱纯本地化构建)
+      - name: 4. 从 tag 自动同步 package.json 版本号
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: 5. 执行自动化编译 (沙箱纯本地化构建)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: |
           npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
 
-      - name: 5. 生成输出文件名 (版本号取自触发 tag，无需手动改动)
+      - name: 6. 生成输出文件名 (版本号取自触发 tag，无需手动改动)
         id: name
         shell: bash
         run: echo "output_name=${{ matrix.output_prefix }}-${{ github.ref_name }}.zip" >> "$GITHUB_OUTPUT"
 
-      - name: 6. 重命名 macOS 安装包
+      - name: 7. 重命名 macOS 安装包
         if: matrix.target == 'mac'
         run: |
           cd dist
@@ -61,27 +67,27 @@ jobs:
             mv *x64*.zip "${{ steps.name.outputs.output_name }}" || mv *.zip "${{ steps.name.outputs.output_name }}"
           fi
 
-      - name: 7. 重命名 Windows 安装包
+      - name: 8. 重命名 Windows 安装包
         if: matrix.target == 'win'
         shell: bash
         run: |
           cd dist
           mv *.zip "${{ steps.name.outputs.output_name }}"
 
-      - name: 8. 生成 SHA-256 校验码 (macOS)
+      - name: 9. 生成 SHA-256 校验码 (macOS)
         if: matrix.target == 'mac'
         run: |
           cd dist
           shasum -a 256 "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
 
-      - name: 9. 生成 SHA-256 校验码 (Windows)
+      - name: 10. 生成 SHA-256 校验码 (Windows)
         if: matrix.target == 'win'
         shell: bash
         run: |
           cd dist
           sha256sum "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
 
-      - name: 10. 暂存编译产物
+      - name: 11. 暂存编译产物
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.arch }}-${{ matrix.target }}
