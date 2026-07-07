@@ -2,6 +2,29 @@ const { app, BrowserWindow, ipcMain, clipboard, dialog } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const fs = require('fs');
+const os = require('os');
+
+// 统一的 Windows PowerShell 执行器：把脚本写入临时 .ps1 文件后用 -File 方式执行，
+// 彻底避免把带 here-string / 双引号的多行脚本硬压成单行塞进 -Command "..."
+// 所引发的换行丢失、引号错位等一系列脆弱问题。执行完毕后静默清理临时文件。
+function runWindowsPowerShell(scriptContent) {
+  return new Promise((resolve) => {
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `teamsecho_ps_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`
+    );
+    try {
+      fs.writeFileSync(tmpFile, scriptContent, 'utf8');
+    } catch (e) {
+      resolve({ err: e, stdout: '' });
+      return;
+    }
+    exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`, (err, stdout) => {
+      fs.unlink(tmpFile, () => {});
+      resolve({ err, stdout });
+    });
+  });
+}
 
 let mainWindow;
 let safetyWindow;
@@ -85,39 +108,60 @@ function getFrontmostAppName() {
         resolve(err ? '' : stdout.trim());
       });
     } else {
-      const psCommand = `
-        Add-Type @"
-          using System;
-          using System.Runtime.InteropServices;
-          using System.Text;
-          public class Win32 {
-            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-            [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-          }
-"@;
-        $h = [Win32]::GetForegroundWindow();
-        $sb = New-Object System.Text.StringBuilder 256;
-        [Win32]::GetWindowText($h, $sb, 256) | Out-Null;
-        $pid = 0;
-        [Win32]::GetWindowThreadProcessId($h, [ref]$pid) | Out-Null;
-        $p = Get-Process -Id $pid -ErrorAction SilentlyContinue;
-        if ($p) { $p.ProcessName + "||" + $sb.ToString() } else { "||" + $sb.ToString() }
-      `;
-      exec(`powershell -Command "${psCommand.replace(/\n/g, ' ')}"`, (err, stdout) => {
+      const psScript = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class Win32 {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+}
+"@
+
+$h = [Win32]::GetForegroundWindow()
+$sb = New-Object System.Text.StringBuilder 256
+[Win32]::GetWindowText($h, $sb, 256) | Out-Null
+$procId = 0
+[Win32]::GetWindowThreadProcessId($h, [ref]$procId) | Out-Null
+$p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+if ($p) { Write-Output ($p.ProcessName + "||" + $sb.ToString()) } else { Write-Output ("||" + $sb.ToString()) }
+`;
+      runWindowsPowerShell(psScript).then(({ err, stdout }) => {
         resolve(err ? '' : stdout.trim());
       });
     }
   });
 }
 
-// 网页版 + 客户端多维立体白名单放行校验（含 Teams 标记则判定安全）
+// 核心优化状态机：记录“上一次确认前台确实是 Teams 上下文”的状态。
+let lastKnownTeamsContext = false;
+
+// 网页版 + 客户端多维立体白名单放行校验（状态化高级容错）
 function isForegroundTeams(rawInfo) {
   if (!rawInfo) return false;
-  return /teams/i.test(rawInfo);
+
+  const [procNameRaw, titleRaw] = rawInfo.split('||');
+  const procName = (procNameRaw || '').toLowerCase().trim();
+  const title = (titleRaw || '').toLowerCase().trim();
+
+  if (/teams/.test(title)) {
+    lastKnownTeamsContext = true;
+    return true;
+  }
+
+  const isBrowserProc = /chrome|msedge/.test(procName);
+  const titleUnreadable = title === '' || title === '未知窗口';
+
+  if (isBrowserProc && titleUnreadable && lastKnownTeamsContext) {
+    return true;
+  }
+
+  lastKnownTeamsContext = false;
+  return false;
 }
 
-// 精确窗口定位与激活（基于句柄与特定窗体升维，终结多浏览器窗口乱跳）
 function activateTargetTarget(rawInfo) {
   return new Promise((resolve) => {
     const isChrome = /chrome/i.test(rawInfo);
@@ -165,8 +209,8 @@ function activateTargetTarget(rawInfo) {
 
       const formattedExclude = excludeProc ? excludeProc.split(',').map(s => `"${s}"`).join(',') : '';
 
-      const psCommand = `
-        Add-Type @"
+      const psScript = `
+Add-Type @"
 using System;
 using System.Text;
 using System.Collections.Generic;
@@ -231,17 +275,34 @@ public class WinFinder {
         return SetForegroundWindow(hWnd);
     }
 }
-"@;
-        $excludeArr = @(${formattedExclude});
-        $hwnd = [WinFinder]::Find("${targetProc}", "teams", $excludeArr);
-        if ($hwnd -ne [IntPtr]::Zero) {
-          [WinFinder]::Activate($hwnd) | Out-Null;
-        } else {
-          $w = New-Object -ComObject Wscript.Shell;
-          [void]$w.AppActivate('Teams');
-        }
-      `;
-      exec(`powershell -Command "${psCommand.replace(/\n/g, ' ')}"`, () => resolve());
+"@
+
+$excludeArr = @(${formattedExclude})
+$hwnd = [WinFinder]::Find("${targetProc}", "teams", $excludeArr)
+if ($hwnd -ne [IntPtr]::Zero) {
+    [WinFinder]::Activate($hwnd) | Out-Null
+} else {
+    $w = New-Object -ComObject Wscript.Shell
+    $activated = $false
+
+    if ("${isChrome ? '1' : '0'}" -eq "1") {
+        $activated = $w.AppActivate('Chrome')
+    } elseif ("${isEdge ? '1' : '0'}" -eq "1") {
+        $activated = $w.AppActivate('Edge')
+    }
+
+    if (-not $activated) {
+        $activated = $w.AppActivate('Teams')
+    }
+
+    Start-Sleep -m 350
+    $hwnd2 = [WinFinder]::Find("${targetProc}", "teams", $excludeArr)
+    if ($hwnd2 -ne [IntPtr]::Zero) {
+        [WinFinder]::Activate($hwnd2) | Out-Null
+    }
+}
+`;
+      runWindowsPowerShell(psScript).then(() => resolve());
     }
   });
 }
@@ -303,23 +364,23 @@ function runPlatformKeystrokeForPerson(name, speedLevel) {
       await activateTargetTarget(rawInfo);
       exec(`osascript -e '${script}'`, () => resolve());
     } else {
-      const psCommand = `
-        $wshell = New-Object -ComObject Wscript.Shell;
-        Start-Sleep -m ${win60};
-        $wshell.SendKeys("@");
-        Start-Sleep -m ${win60};
-        $wshell.SendKeys("{LEFT}");
-        Start-Sleep -m ${win60};
-        $wshell.SendKeys("^v");
-        Start-Sleep -m ${win150};
-        $wshell.SendKeys("1");
-        Start-Sleep -m ${win60};
-        $wshell.SendKeys("{BACKSPACE}");
-        Start-Sleep -m ${win180};
-        $wshell.SendKeys("{ENTER}");
-      `;
+      const psScript = `
+$wshell = New-Object -ComObject Wscript.Shell
+Start-Sleep -m ${win60}
+$wshell.SendKeys("@")
+Start-Sleep -m ${win60}
+$wshell.SendKeys("{LEFT}")
+Start-Sleep -m ${win60}
+$wshell.SendKeys("^v")
+Start-Sleep -m ${win150}
+$wshell.SendKeys("1")
+Start-Sleep -m ${win60}
+$wshell.SendKeys("{BACKSPACE}")
+Start-Sleep -m ${win180}
+$wshell.SendKeys("{ENTER}")
+`;
       await activateTargetTarget(rawInfo);
-      exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`, () => resolve());
+      runWindowsPowerShell(psScript).then(() => resolve());
     }
   });
 }
@@ -338,13 +399,13 @@ function pasteRichContent(speedLevel) {
       await activateTargetTarget(rawInfo);
       exec(`osascript -e '${script}'`, () => resolve());
     } else {
-      const psCommand = `
-        $w = New-Object -ComObject Wscript.Shell;
-        Start-Sleep -m ${win150};
-        $w.SendKeys('^v')
-      `;
+      const psScript = `
+$w = New-Object -ComObject Wscript.Shell
+Start-Sleep -m ${win150}
+$w.SendKeys('^v')
+`;
       await activateTargetTarget(rawInfo);
-      exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`, () => resolve());
+      runWindowsPowerShell(psScript).then(() => resolve());
     }
   });
 }
@@ -363,13 +424,13 @@ function safeLineBreak(speedLevel) {
       await activateTargetTarget(rawInfo);
       exec(`osascript -e '${script}'`, () => resolve());
     } else {
-      const psCommand = `
-        $w = New-Object -ComObject Wscript.Shell;
-        Start-Sleep -m ${win100};
-        $w.SendKeys('+{ENTER}')
-      `;
+      const psScript = `
+$w = New-Object -ComObject Wscript.Shell
+Start-Sleep -m ${win100}
+$w.SendKeys('+{ENTER}')
+`;
       await activateTargetTarget(rawInfo);
-      exec(`powershell -Command "${psCommand.replace(/\n/g, '')}"`, () => resolve());
+      runWindowsPowerShell(psScript).then(() => resolve());
     }
   });
 }
@@ -420,7 +481,11 @@ ipcMain.on('safety-response', async (event, responseType) => {
       exec(`osascript -e 'delay ${d80}\ntell application "System Events" to keystroke "x" using {command down, shift down}'`);
     } else {
       await activateTargetTarget(rawInfo);
-      exec(`powershell -Command "$w = New-Object -ComObject Wscript.Shell; Start-Sleep -m ${win80}; $w.SendKeys('^+x')"`);
+      runWindowsPowerShell(`
+$w = New-Object -ComObject Wscript.Shell
+Start-Sleep -m ${win80}
+$w.SendKeys('^+x')
+`);
     }
     return;
   }
@@ -490,7 +555,7 @@ ipcMain.on('safety-response', async (event, responseType) => {
       mainWindow.webContents.send('status-update', '✅ 自动化执行完毕。');
     }
 
-    // 内存安全纵深防御：结束时立刻在内存中物理清空任务数据，防扫描留痕
+    // 零痕迹纵深防御：立刻物理擦除任务残留
     currentAutomationData = null;
 
     setTimeout(() => { clipboard.writeText(originalClipboard); }, 500);
