@@ -1,4 +1,4 @@
-# 📌 TeamsEcho v1.2.0
+# 📌 TeamsEcho v1.2.1
 
 专为 Microsoft Teams 打造的轻量化、高效率桌面自动化辅助工具。
 
