@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('teamsEchoAPI', {
   onForegroundLost: (callback) => {
     ipcRenderer.on('foreground-lost', (_event, appName) => callback(appName));
   },
+  onModeInfo: (callback) => {
+    ipcRenderer.on('safety-mode-info', (_event, turboMode) => callback(turboMode));
+  },
   resumeAfterForegroundLost: () => ipcRenderer.send('resume-after-foreground-lost'),
 });

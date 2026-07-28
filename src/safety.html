@@ -15,9 +15,16 @@
     .footer-action { text-align: center; border-top: 1px solid #e5e5ea; padding-top: 10px; width: 100%; box-sizing: border-box; }
     .btn-cancel { width: 45%; background: #ff3b30; color: white; }
     .btn-cancel:hover { background: #dc3545; }
+
+    .mode-banner { width: 100%; box-sizing: border-box; text-align: center; font-size: 13px; font-weight: 700; padding: 6px 10px; border-radius: 6px; margin-bottom: 10px; display: none; }
+    .mode-banner.show { display: block; }
+    .mode-banner.turbo { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+    .mode-banner.safe { background: #e8f7ec; color: #1e7e34; border: 1px solid #c3e6cb; }
   </style>
 </head>
 <body>
+
+  <div id="modeBanner" class="mode-banner"></div>
 
   <div class="modal-body">
     💡 请核对：<br>
@@ -46,6 +53,7 @@
     const confirmBtn = document.getElementById('confirmBtn');
     const switchBtn = document.getElementById('switchBtn');
     const cancelBtn = document.getElementById('cancelBtn');
+    const modeBanner = document.getElementById('modeBanner');
 
     confirmBtn.addEventListener('click', () => window.teamsEchoAPI.safetyResponse('confirm'));
     switchBtn.addEventListener('click', () => window.teamsEchoAPI.safetyResponse('switch'));
@@ -53,6 +61,18 @@
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { window.teamsEchoAPI.safetyResponse('cancel'); }
+    });
+
+    window.teamsEchoAPI.onModeInfo((turboMode) => {
+      modeBanner.classList.remove('turbo', 'safe');
+      const commonRisk = '（@ 序列已去掉左移定位步骤，如有同名/相近名字请确认已单独测试过，避免静默 @ 错人）';
+      if (turboMode) {
+        modeBanner.innerText = '🚀 极速模式：延迟按滑块档位严格执行，个别人名可能来不及命中搜索，留下黑体字需自行核对补发 ' + commonRisk;
+        modeBanner.classList.add('turbo', 'show');
+      } else {
+        modeBanner.innerText = '🛡️ 稳妥模式 ' + commonRisk;
+        modeBanner.classList.add('safe', 'show');
+      }
     });
   </script>
 </body>

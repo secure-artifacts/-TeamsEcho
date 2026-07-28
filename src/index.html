@@ -5,15 +5,15 @@
   <title>TeamsEcho</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-    .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
-    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
-    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
+    .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; min-height: 0; }
+    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; min-height: 0; }
+    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; min-height: 0; }
     label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; display: block; }
-    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; }
-    .editor-container { flex: 1; display: flex; flex-direction: column; margin-bottom: 12px; }
-    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; }
+    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; min-height: 0; }
+    .editor-container { flex: 1; display: flex; flex-direction: column; margin-bottom: 12px; min-height: 0; }
+    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; min-height: 0; }
     .rich-editor:focus { border-color: #007aff; }
-    .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
+    .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; flex-shrink: 0; }
     .setting-row { margin-bottom: 12px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
     .setting-select { padding: 5px 10px; border-radius: 5px; border: 1px solid #d1d1d6; outline: none; font-size: 13px; background: white; cursor: pointer; color: #333; font-weight: 500; }
     
@@ -21,6 +21,14 @@
     .speed-slider { flex: 1; height: 6px; -webkit-appearance: none; background: #d1d1d6; border-radius: 3px; outline: none; cursor: pointer; }
     .speed-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #007aff; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
     .speed-label { font-size: 13px; font-weight: bold; color: #333; min-width: 90px; text-align: right; }
+
+    .mode-container { display: flex; align-items: center; gap: 15px; background: #f1f2f6; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+    .mode-switch { flex: 1; display: flex; border-radius: 6px; overflow: hidden; border: 1px solid #d1d1d6; }
+    .mode-option { flex: 1; text-align: center; padding: 6px 8px; font-size: 13px; font-weight: 600; cursor: pointer; background: white; color: #666; transition: background 0.15s, color 0.15s; user-select: none; }
+    .mode-option.active-safe { background: #34c759; color: white; }
+    .mode-option.active-turbo { background: #ff9500; color: white; }
+    .mode-hint { font-size: 12px; color: #856404; margin-bottom: 12px; margin-top: -6px; display: none; background: #fff3cd; border: 1px solid #ffeeba; border-radius: 6px; padding: 6px 10px; }
+    .mode-hint.show { display: block; }
 
     .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
     .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
@@ -64,6 +72,20 @@
           <span id="speedLabel" class="speed-label">5 档 (1.00x)</span>
         </div>
 
+        <div class="mode-container">
+          <label style="margin: 0; white-space: nowrap;">🎯 提及模式:</label>
+          <div class="mode-switch">
+            <div id="modeSafe" class="mode-option active-safe">🛡️ 稳妥模式</div>
+            <div id="modeTurbo" class="mode-option">🚀 极速模式</div>
+          </div>
+        </div>
+        <div id="modeHint" class="mode-hint">
+          ⚠️ 极速模式不会跳过"打字触发搜索"这个必需步骤（跳过的话 @ 会完全失效），只是解除了延迟的保底下限，严格按滑块档位跑。风险是搜索可能来不及刷新，个别人名会留下肉眼可见的黑体字（不会误发消息），需要你自己核对补发。
+        </div>
+        <div class="mode-hint show" style="background:#fff2f2; color:#d9383a; border-color:#ffcccc;">
+          🚨 通用风险提示（跟模式无关）：当前 @ 序列已去掉"左移"定位步骤以提速。如果粘贴的名字和群里其他人名字有包含/相近关系（如"张三"和"张三丰"），存在<b>安安静静选中错误的人</b>的风险——界面上看跟正常 @ 一模一样，肉眼分辨不出来。正式批量使用前，请务必先手动测试这类边界场景，确认无误。
+        </div>
+
         <div id="previewText" class="preview-text">👥 待提及名单: 共 0 人</div>
         <div id="progressText" class="progress-text">📊 状态: 等待运行...</div>
         <div class="btn-group">
@@ -95,6 +117,9 @@
     const sequenceMode = document.getElementById('sequenceMode');
     const speedSlider = document.getElementById('speedSlider');
     const speedLabel = document.getElementById('speedLabel');
+    const modeSafe = document.getElementById('modeSafe');
+    const modeTurbo = document.getElementById('modeTurbo');
+    const modeHint = document.getElementById('modeHint');
     const pauseOverlay = document.getElementById('pauseOverlay');
     const pauseMsg = document.getElementById('pauseMsg');
     const resumeBtn = document.getElementById('resumeBtn');
@@ -103,6 +128,27 @@
       1: "3.00", 2: "2.28", 3: "1.73", 4: "1.32", 5: "1.00",
       6: "0.57", 7: "0.32", 8: "0.185", 9: "0.105", 10: "0.06"
     };
+
+    let turboMode = false;
+
+    function updateModeUI() {
+      modeSafe.classList.toggle('active-safe', !turboMode);
+      modeTurbo.classList.toggle('active-turbo', turboMode);
+      modeHint.classList.toggle('show', turboMode);
+    }
+
+    function setTurboMode(val) {
+      turboMode = val;
+      updateModeUI();
+      window.teamsEchoAPI.saveSettings({
+        sequenceMode: sequenceMode.value,
+        speedLevel: parseInt(speedSlider.value),
+        turboMode
+      });
+    }
+
+    modeSafe.addEventListener('click', () => setTurboMode(false));
+    modeTurbo.addEventListener('click', () => setTurboMode(true));
 
     function getCleanNames() {
       return namesInput.value.split('\n')
@@ -119,14 +165,16 @@
       updateSpeedUI(val);
       window.teamsEchoAPI.saveSettings({
         sequenceMode: sequenceMode.value,
-        speedLevel: parseInt(val)
+        speedLevel: parseInt(val),
+        turboMode
       });
     });
 
     sequenceMode.addEventListener('change', () => {
       window.teamsEchoAPI.saveSettings({
         sequenceMode: sequenceMode.value,
-        speedLevel: parseInt(speedSlider.value)
+        speedLevel: parseInt(speedSlider.value),
+        turboMode
       });
     });
 
@@ -143,6 +191,8 @@
           speedSlider.value = settings.speedLevel;
           updateSpeedUI(settings.speedLevel);
         }
+        turboMode = !!settings.turboMode;
+        updateModeUI();
       }
     });
 
@@ -154,7 +204,8 @@
         htmlContent: richEditor.innerHTML,
         textContent: richEditor.innerText,
         sequenceMode: sequenceMode.value,
-        speedLevel: parseInt(speedSlider.value)
+        speedLevel: parseInt(speedSlider.value),
+        turboMode
       });
     });
 
