@@ -1,13 +1,28 @@
-# 📌 TeamsEcho v1.2.2
+# TeamsEcho v1.2.4
 
-专为 Microsoft Teams 打造的轻量化、高效率桌面自动化辅助工具。
+专为 Microsoft Teams 打造的轻量化桌面自动化辅助工具。
 
-## 🔒 隐私安全与运行校验规范
-1. **零留存机制**：本软件不进行任何形式的写盘操作或网络上传，完全在本地内存运作。
-2. **首次运行引导**：由于未付费进行商用公证，首次运行若被 Gatekeeper 拦截，请**右键点击软件选择「打开」**。并且在首次运行时，请确保在 macOS 的 `系统设置 -> 隐私与安全性 -> 辅助功能` 中赋予本地应用程序以控制键盘流的权限。
+## 隐私、安全与运行权限
 
-## ✅ 构件证明（SLSA Build Provenance）
-从 v1.1.4 起，Release 发布流程会在 `publish` job 内、上传到 GitHub Releases 之前，对最终产物文件（`release-dir/*.zip`）执行 `actions/attest-build-provenance@v2` 签名。
-- 签名与发布在**同一个 job** 内完成，不经过二次打包或跨 job 传输，避免 SHA-256 漂移。
-- 相关写权限（`id-token`、`attestations`）仅授予 `publish` 这一个 job，`build` job 仍保持只读的 `contents: read`。
-- 你可以在 Release 页面通过 `gh attestation verify` 或 GitHub 的 Attestations 面板核实产物来源。
+TeamsEcho 的自动化仅在本机执行。首次运行时，请在 macOS 的“系统设置 → 隐私与安全性 → 辅助功能”中授予应用控制键盘的权限；未公证构建如被 Gatekeeper 拦截，可在“应用程序”中右键选择“打开”。
+
+## 模式与稳定性基线
+
+| 模式 | 推荐稳定档位 | 键序 |
+|---|---:|---|
+| 稳妥模式 | 6 档 | `@ → 左移 → 粘贴 → 1 → 删除 → 回车` |
+| 极速模式 | 8 档 | `@ → 粘贴 → 1 → 删除 → 回车` |
+
+极速模式 9 档使用极速模式 8 档的候选搜索等待下限作为最小保护，但仍属于测试档；10 档不建议用于正式批量操作。
+
+## 构件证明与 Release 验证
+
+v1.2.4 发布工作流采用 Draft Release → 上传最终命名资产 → `actions/attest@v4` 证明最终字节流 → 发布 Draft 的顺序。发布资产固定为 `TeamsEcho-macos-vX.Y.Z.zip`、`TeamsEcho-intel-vX.Y.Z.zip` 与 `TeamsEcho-windows-vX.Y.Z.zip`，并附带 SHA-256 清单。
+
+发布后可执行：
+
+```bash
+gh attestation verify TeamsEcho-macos-v1.2.4.zip --repo secure-artifacts/-TeamsEcho
+gh attestation verify TeamsEcho-intel-v1.2.4.zip --repo secure-artifacts/-TeamsEcho
+gh attestation verify TeamsEcho-windows-v1.2.4.zip --repo secure-artifacts/-TeamsEcho
+```

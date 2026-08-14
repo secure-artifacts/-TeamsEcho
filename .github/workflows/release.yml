@@ -5,11 +5,13 @@ on:
     tags:
       - 'v*'
 
+# 默认最小权限；各 job 仅声明运行所需权限。
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build for ${{ matrix.target }} (${{ matrix.arch }})
-    permissions:
-      contents: read
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,36 +37,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
-      - name: 3. 安装依赖
+      - name: 3. 安装锁定依赖
         run: npm ci
 
-      - name: 4. 从 tag 自动同步 package.json 版本号
+      - name: 4. 从 tag 同步构建版本
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
 
-      - name: 5. 执行自动化编译 (沙箱纯本地化构建)
+      - name: 5. 纯本地构建
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: |
-          npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
+        run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
 
-      - name: 6. 生成输出文件名 (版本号取自触发 tag，无需手动改动)
+      - name: 6. 固定 Release 资产名
         id: name
         shell: bash
         run: echo "output_name=${{ matrix.output_prefix }}-${{ github.ref_name }}.zip" >> "$GITHUB_OUTPUT"
 
       - name: 7. 重命名 macOS 安装包
         if: matrix.target == 'mac'
+        shell: bash
         run: |
           cd dist
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            mv *arm64*.zip "${{ steps.name.outputs.output_name }}" || mv *.zip "${{ steps.name.outputs.output_name }}"
+            mv *arm64*.zip "${{ steps.name.outputs.output_name }}"
           else
-            mv *x64*.zip "${{ steps.name.outputs.output_name }}" || mv *.zip "${{ steps.name.outputs.output_name }}"
+            mv *x64*.zip "${{ steps.name.outputs.output_name }}"
           fi
 
       - name: 8. 重命名 Windows 安装包
@@ -74,62 +76,90 @@ jobs:
           cd dist
           mv *.zip "${{ steps.name.outputs.output_name }}"
 
-      - name: 9. 生成 SHA-256 校验码 (macOS)
-        if: matrix.target == 'mac'
-        run: |
-          cd dist
-          shasum -a 256 "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
-
-      - name: 10. 生成 SHA-256 校验码 (Windows)
-        if: matrix.target == 'win'
+      - name: 9. 生成 SHA-256 校验文件
         shell: bash
         run: |
           cd dist
-          sha256sum "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
+          else
+            sha256sum "${{ steps.name.outputs.output_name }}" > "${{ steps.name.outputs.output_name }}.sha256"
+          fi
 
-      - name: 11. 暂存编译产物
+      - name: 10. 暂存构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts-${{ matrix.arch }}-${{ matrix.target }}
+          name: release-${{ matrix.target }}-${{ matrix.arch }}
           path: |
             dist/${{ steps.name.outputs.output_name }}
             dist/${{ steps.name.outputs.output_name }}.sha256
+          if-no-files-found: error
           retention-days: 1
 
   publish:
-    name: Public Secure Release Artifacts
+    name: Attest and publish final Release assets
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
-    runs-on: ubuntu-latest
     steps:
-      - name: 1. 下载所有二进制包
+      - name: 1. 下载全部构建产物
         uses: actions/download-artifact@v4
         with:
           path: all-artifacts
+          pattern: release-*
+          merge-multiple: true
 
-      - name: 2. 汇总发布清单
+      - name: 2. 组装并验证最终 Release 资产
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir release-dir
-          find all-artifacts -type f -exec cp {} release-dir/ \;
+          cp all-artifacts/*.zip release-dir/
+          cp all-artifacts/*.sha256 release-dir/
           cd release-dir
-          echo "### TeamsEcho ${{ github.ref_name }} SHA-256 Checksums" > csm-manifest.txt
-          cat *.sha256 >> csm-manifest.txt
-          rm *.sha256
+          test "$(find . -maxdepth 1 -name '*.zip' -type f | wc -l | tr -d ' ')" -eq 3
+          test -f "TeamsEcho-macos-${GITHUB_REF_NAME}.zip"
+          test -f "TeamsEcho-intel-${GITHUB_REF_NAME}.zip"
+          test -f "TeamsEcho-windows-${GITHUB_REF_NAME}.zip"
+          echo "### TeamsEcho ${GITHUB_REF_NAME} SHA-256 Checksums" > csm-manifest.txt
+          cat -- *.sha256 >> csm-manifest.txt
+          rm -- *.sha256
+          ls -lah
 
-      - name: 3. 生成构件证明 (SLSA Provenance)
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: "release-dir/*.zip"
-
-      - name: 4. 发布到 GitHub Releases
+      # 先将最终字节流作为 Draft Release 资产上传；之后的 subject-path 与
+      # 实际 Release assets 完全一致。发布后若启用 Immutable Releases，GitHub
+      # 还会生成 Release attestation。
+      - name: 3. 创建 Draft 并上传最终资产
         uses: softprops/action-gh-release@v2
         with:
-          files: "release-dir/*"
+          tag_name: ${{ github.ref_name }}
+          name: TeamsEcho ${{ github.ref_name }}
           body_path: release-dir/csm-manifest.txt
-          draft: false
+          files: |
+            release-dir/TeamsEcho-macos-${{ github.ref_name }}.zip
+            release-dir/TeamsEcho-intel-${{ github.ref_name }}.zip
+            release-dir/TeamsEcho-windows-${{ github.ref_name }}.zip
+            release-dir/csm-manifest.txt
+          draft: true
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 对已在 Draft Release 中、且不会再被修改的最终文件生成 provenance。
+      - name: 4. 生成最终 Release 资产构件证明
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-dir/TeamsEcho-macos-${{ github.ref_name }}.zip
+            release-dir/TeamsEcho-intel-${{ github.ref_name }}.zip
+            release-dir/TeamsEcho-windows-${{ github.ref_name }}.zip
+            release-dir/csm-manifest.txt
+
+      - name: 5. 发布 Draft Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false

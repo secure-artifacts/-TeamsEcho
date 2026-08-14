@@ -6,11 +6,15 @@ contextBridge.exposeInMainWorld('teamsEchoAPI', {
   stopAutomation: () => ipcRenderer.send('stop-automation'),
   saveSettings: (settings) => ipcRenderer.send('save-settings', settings),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
+  getRuntimeProfile: () => ipcRenderer.invoke('get-runtime-profile'),
   onStatusUpdate: (callback) => {
-    ipcRenderer.on('status-update', (_event, msg) => callback(msg));
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('status-update', listener);
+    return () => ipcRenderer.removeListener('status-update', listener);
   },
-  onForegroundLost: (callback) => {
-    ipcRenderer.on('foreground-lost', (_event, appName) => callback(appName));
+  onSafetyModeInfo: (callback) => {
+    const listener = (_event, turboMode) => callback(turboMode);
+    ipcRenderer.on('safety-mode-info', listener);
+    return () => ipcRenderer.removeListener('safety-mode-info', listener);
   },
-  resumeAfterForegroundLost: () => ipcRenderer.send('resume-after-foreground-lost'),
 });
