@@ -62,19 +62,29 @@ jobs:
         if: matrix.target == 'mac'
         shell: bash
         run: |
+          set -euo pipefail
           cd dist
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            mv *arm64*.zip "${{ steps.name.outputs.output_name }}"
-          else
-            mv *x64*.zip "${{ steps.name.outputs.output_name }}"
+          shopt -s nullglob
+          packages=(*.zip)
+          if [ "${#packages[@]}" -ne 1 ]; then
+            printf 'Expected exactly one macOS ZIP, found %s: %s\n' "${#packages[@]}" "${packages[*]:-none}" >&2
+            exit 1
           fi
+          mv "${packages[0]}" "${{ steps.name.outputs.output_name }}"
 
       - name: 8. 重命名 Windows 安装包
         if: matrix.target == 'win'
         shell: bash
         run: |
+          set -euo pipefail
           cd dist
-          mv *.zip "${{ steps.name.outputs.output_name }}"
+          shopt -s nullglob
+          packages=(*.zip)
+          if [ "${#packages[@]}" -ne 1 ]; then
+            printf 'Expected exactly one Windows ZIP, found %s: %s\n' "${#packages[@]}" "${packages[*]:-none}" >&2
+            exit 1
+          fi
+          mv "${packages[0]}" "${{ steps.name.outputs.output_name }}"
 
       - name: 9. 生成 SHA-256 校验文件
         shell: bash
