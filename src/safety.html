@@ -1,58 +1,87 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>安全复核栏</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>安全核对</title>
   <style>
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; box-sizing: border-box; padding: 20px; }
-    .modal-body { font-size: 24px; font-weight: 700; color: #d9383a; line-height: 1.6; background: #fff2f2; padding: 20px 24px; border-radius: 10px; border: 1px solid #ffcccc; margin-bottom: 12px; text-align: center; width: 100%; box-sizing: border-box; }
-    .action-btn { padding: 11px 18px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.1s; }
-    .row-actions { display: flex; gap: 16px; width: 100%; justify-content: space-between; margin-bottom: 20px; box-sizing: border-box; }
-    .btn-confirm { flex: 1; background: #34c759; color: white; }
-    .btn-confirm:hover { background: #28a745; }
-    .btn-switch { flex: 1; background: #e5e5ea; color: #1c1c1e; border: 1px solid #d1d1d6; }
-    .btn-switch:hover { background: #d1d1d6; }
-    .footer-action { text-align: center; border-top: 1px solid #e5e5ea; padding-top: 10px; width: 100%; box-sizing: border-box; }
-    .btn-cancel { width: 45%; background: #ff3b30; color: white; }
-    .btn-cancel:hover { background: #dc3545; }
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      display: flex;
+      min-height: 100vh;
+      margin: 0;
+      padding: 22px;
+      color: #17212b;
+      background: #f6f8fb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    }
+    .dialog {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 16px;
+      padding: 22px;
+      border: 1px solid #dfe5ec;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 8px 28px rgba(20, 39, 62, 0.08);
+    }
+    h1 { margin: 0; font-size: 18px; }
+    p { margin: 0; color: #526171; font-size: 13px; line-height: 1.6; }
+    .notice {
+      padding: 14px;
+      border: 1px solid #f0d39c;
+      border-radius: 9px;
+      background: #fff9ec;
+      color: #6d4d12;
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 1.55;
+    }
+    .mode-banner { padding: 10px 12px; border: 1px solid #c4e5d0; border-radius: 8px; color: #17633e; background: #effaf3; font-size: 12px; line-height: 1.5; }
+    .mode-banner.turbo { border-color: #f2cf91; color: #7b4b0c; background: #fffaf1; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .confirm { background: #198754; }
+    .switch { border: 1px solid #ced8e5; color: #314456; background: #eef3f9; }
+    .cancel { align-self: center; min-height: 32px; padding: 0 18px; background: #c93b36; }
   </style>
 </head>
 <body>
-
-  <div class="modal-body">
-    💡 请核对：<br>
-    此时前台的 Teams 聊天框是否已经是带有格式工具栏的「富文本大框」？<br>
-    <span style="font-size:14px; font-weight:400; color:#8a5a5a;">
-      （注意：这里只核对输入框样式；运行过程中如果前台切走，程序会自动暂停并再次提醒你，不需要靠这个按钮来兜底。）
-    </span>
-  </div>
-
-  <div class="row-actions">
-    <button class="action-btn btn-confirm" id="confirmBtn">
-      ✅ 是大框，确认发送
-    </button>
-    <button class="action-btn btn-switch" id="switchBtn">
-      🔄 一键切换大框
-    </button>
-  </div>
-
-  <div class="footer-action">
-    <button class="action-btn btn-cancel" id="cancelBtn">
-      ❌ 取消发送
-    </button>
-  </div>
-
+  <main class="dialog">
+    <h1>开始前安全核对</h1>
+    <div id="modeBanner" class="mode-banner"></div>
+    <div class="notice">请确认 Teams 当前聊天已打开带格式工具栏的富文本输入框。</div>
+    <p>确认后将定位目标 Teams 窗口并连续执行。执行期间不会再因窗口标题未识别而暂停；如需中止，请在 TeamsEcho 主窗口使用“停止”或 Esc。</p>
+    <div class="actions">
+      <button class="confirm" id="confirmBtn" type="button">已确认，开始执行</button>
+      <button class="switch" id="switchBtn" type="button">切换为富文本大框</button>
+    </div>
+    <button class="cancel" id="cancelBtn" type="button">取消</button>
+  </main>
   <script>
-    const confirmBtn = document.getElementById('confirmBtn');
-    const switchBtn = document.getElementById('switchBtn');
-    const cancelBtn = document.getElementById('cancelBtn');
-
-    confirmBtn.addEventListener('click', () => window.teamsEchoAPI.safetyResponse('confirm'));
-    switchBtn.addEventListener('click', () => window.teamsEchoAPI.safetyResponse('switch'));
-    cancelBtn.addEventListener('click', () => window.teamsEchoAPI.safetyResponse('cancel'));
-
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { window.teamsEchoAPI.safetyResponse('cancel'); }
+    const modeBanner = document.getElementById('modeBanner');
+    document.getElementById('confirmBtn').addEventListener('click', () => window.teamsEchoAPI.safetyResponse('confirm'));
+    document.getElementById('switchBtn').addEventListener('click', () => window.teamsEchoAPI.safetyResponse('switch'));
+    document.getElementById('cancelBtn').addEventListener('click', () => window.teamsEchoAPI.safetyResponse('cancel'));
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') window.teamsEchoAPI.safetyResponse('cancel');
+    });
+    window.teamsEchoAPI.onSafetyModeInfo((turboMode) => {
+      modeBanner.classList.toggle('turbo', turboMode);
+      modeBanner.innerText = turboMode
+        ? '极速模式：@ → 粘贴 → 1 → 删除 → 回车。请先在测试群确认同名或相近姓名不会误选。'
+        : '稳妥模式：@ → 左移 → 粘贴 → 1 → 删除 → 回车。Windows 保留 103ms 搜索/缓冲锁。';
     });
   </script>
 </body>

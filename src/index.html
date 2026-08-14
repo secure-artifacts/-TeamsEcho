@@ -1,91 +1,260 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TeamsEcho</title>
   <style>
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f7; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-    .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
-    .left-panel { width: 25%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }
-    .right-panel { width: 75%; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 15px; justify-content: space-between; }
-    label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; display: block; }
-    textarea { flex: 1; width: 93%; resize: none; border: 1px solid #d1d1d6; border-radius: 6px; padding: 8px; font-size: 14px; outline: none; }
-    .editor-container { flex: 1; display: flex; flex-direction: column; margin-bottom: 12px; }
-    .rich-editor { flex: 1; border: 1px solid #d1d1d6; border-radius: 6px; padding: 12px; font-size: 14px; overflow-y: auto; outline: none; background: #fff; }
-    .rich-editor:focus { border-color: #007aff; }
-    .control-area { border-top: 1px solid #e5e5ea; padding-top: 12px; }
-    .setting-row { margin-bottom: 12px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
-    .setting-select { padding: 5px 10px; border-radius: 5px; border: 1px solid #d1d1d6; outline: none; font-size: 13px; background: white; cursor: pointer; color: #333; font-weight: 500; }
-    
-    .slider-container { display: flex; align-items: center; gap: 15px; background: #f1f2f6; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
-    .speed-slider { flex: 1; height: 6px; -webkit-appearance: none; background: #d1d1d6; border-radius: 3px; outline: none; cursor: pointer; }
-    .speed-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #007aff; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-    .speed-label { font-size: 13px; font-weight: bold; color: #333; min-width: 90px; text-align: right; }
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --border: #dfe5ec;
+      --text: #17212b;
+      --muted: #687482;
+      --primary: #1769e0;
+      --primary-hover: #0f58c6;
+      --success: #198754;
+      --success-hover: #147242;
+      --danger: #c93b36;
+      --danger-hover: #ad2c28;
+      --focus: rgba(23, 105, 224, 0.18);
+    }
 
-    .preview-text { font-size: 13px; color: #666; margin-bottom: 8px; }
-    .progress-text { font-size: 13px; font-weight: bold; color: #007aff; margin-bottom: 12px; }
-    .btn-group { display: flex; gap: 12px; }
-    .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center; }
-    .btn-start { background: #34c759; color: white; }
-    .btn-start:hover { background: #28a745; }
-    .btn-stop { background: #ff3b30; color: white; }
-    .btn-stop:hover { background: #dc3545; }
-    
-    .footer-tip { background: #fff3cd; color: #856404; font-size: 12px; padding: 8px 12px; text-align: left; border-top: 1px solid #ffeeba; line-height: 1.4; }
-    
-    .pause-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 99999; }
-    .pause-box { width: 400px; background: white; border-radius: 10px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-    .pause-btn { margin-top: 15px; padding: 8px 20px; border: none; background: #007aff; color: white; border-radius: 5px; font-weight: bold; cursor: pointer; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 780px;
+      min-height: 560px;
+      height: 100vh;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    }
+
+    .app-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 18px;
+      gap: 14px;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(210px, 0.72fr) minmax(450px, 1.7fr);
+      flex: 1;
+      min-height: 0;
+      gap: 14px;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 6px 22px rgba(20, 39, 62, 0.06);
+    }
+
+    .panel-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 15px; font-weight: 700; }
+    .field-hint { font-size: 12px; color: var(--muted); }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 13px;
+      font-weight: 650;
+      color: #324150;
+    }
+
+    textarea, .rich-editor, select, input[type="range"] { font: inherit; }
+    textarea, .rich-editor, select {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      background: #fff;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    textarea:focus, .rich-editor:focus, select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--focus);
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      resize: none;
+      padding: 11px;
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    .editor-section { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+    .rich-editor {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px;
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .rich-editor:empty::before { content: attr(placeholder); color: #8995a3; pointer-events: none; }
+
+    .control-area {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .setting-row { display: grid; grid-template-columns: 118px 1fr; align-items: center; gap: 10px; }
+    .setting-row label { margin: 0; }
+    select { width: 100%; padding: 8px 10px; color: var(--text); cursor: pointer; }
+
+    .speed-row {
+      display: grid;
+      grid-template-columns: 118px 1fr 82px;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 11px;
+      border-radius: 9px;
+      background: #f2f6fc;
+    }
+    .speed-row label { margin: 0; }
+    .speed-slider { width: 100%; accent-color: var(--primary); cursor: pointer; }
+    .speed-label { font-size: 12px; font-weight: 700; color: #24528f; text-align: right; white-space: nowrap; }
+
+    .mode-row { display: grid; grid-template-columns: 118px 1fr; align-items: center; gap: 10px; }
+    .mode-label { margin: 0; font-size: 13px; font-weight: 650; color: #324150; }
+    .mode-switch { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: 9px; background: #f3f6fa; }
+    .mode-option { min-height: 34px; border: 0; border-radius: 6px; color: #526171; background: transparent; font-size: 12px; font-weight: 700; }
+    .mode-option:hover { transform: none; background: #e8eef5; }
+    .mode-option.active-safe { color: #16623d; background: #e7f6ed; box-shadow: inset 0 0 0 1px #bfe2cd; }
+    .mode-option.active-turbo { color: #8a4d00; background: #fff0d5; box-shadow: inset 0 0 0 1px #f2cf91; }
+    .mode-hint { padding: 9px 11px; border: 1px solid #dce5f0; border-radius: 8px; color: #566575; background: #fafcff; font-size: 12px; line-height: 1.5; }
+    .mode-hint.turbo { border-color: #f2cf91; color: #7b4b0c; background: #fffaf1; }
+
+    .run-summary {
+      display: grid;
+      gap: 5px;
+      padding: 10px 11px;
+      border: 1px solid #e4eaf2;
+      border-radius: 9px;
+      background: #fafcff;
+    }
+    .preview-text, .progress-text { font-size: 12px; line-height: 1.45; }
+    .preview-text { color: var(--muted); }
+    .progress-text { color: #24528f; font-weight: 650; }
+
+    .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    button {
+      min-height: 38px;
+      border: 0;
+      border-radius: 8px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s;
+    }
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    .btn-start { background: var(--success); }
+    .btn-start:hover { background: var(--success-hover); }
+    .btn-stop { background: var(--danger); }
+    .btn-stop:hover { background: var(--danger-hover); }
+
+    .footer-tip {
+      padding: 10px 12px;
+      border: 1px solid #e4eaf2;
+      border-radius: 9px;
+      color: #566575;
+      background: #fff;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .footer-tip strong { color: #314456; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="left-panel">
-      <label>👥 名单输入 (一行一个名字)</label>
-      <textarea id="namesInput" placeholder="张三&#10;李四&#10;#王五 (带#跳过)"></textarea>
-    </div>
-    <div class="right-panel">
-      <div class="editor-container">
-        <label>💬 消息内容</label>
-        <div id="richEditor" class="rich-editor" contenteditable="true" placeholder="在此输入团队通知内容..."></div>
-      </div>
-      <div class="control-area">
-        <div class="setting-row">
-          <label style="margin: 0;">⚙️ 发送逻辑链顺序:</label>
-          <select id="sequenceMode" class="setting-select">
-            <option value="mentionFirst">先批量 @ 提及成员 ──> 再追加消息正文内容</option>
-            <option value="textFirst">先写入消息正文内容 ──> 再在末尾批量 @ 提及成员</option>
-          </select>
+  <main class="app-shell">
+    <section class="workspace" aria-label="TeamsEcho 自动化编辑区">
+      <section class="panel" aria-labelledby="namesHeading">
+        <div class="panel-heading">
+          <h1 id="namesHeading">提及名单</h1>
+          <span class="field-hint">一行一个名字；以 # 开头可跳过</span>
+        </div>
+        <textarea id="namesInput" aria-label="提及名单" placeholder="张三&#10;李四&#10;#王五（跳过）"></textarea>
+      </section>
+
+      <section class="panel" aria-labelledby="messageHeading">
+        <div class="editor-section">
+          <div class="panel-heading">
+            <h1 id="messageHeading">消息内容</h1>
+            <span class="field-hint">支持保留富文本格式</span>
+          </div>
+          <div id="richEditor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" placeholder="在此输入团队通知内容..."></div>
         </div>
 
-        <div class="slider-container">
-          <label style="margin: 0; white-space: nowrap;">⚡️ 自动化执行速度:</label>
-          <input type="range" id="speedSlider" class="speed-slider" min="1" max="10" value="5">
-          <span id="speedLabel" class="speed-label">5 档 (1.00x)</span>
-        </div>
+        <div class="control-area">
+          <div class="setting-row">
+            <label for="sequenceMode">执行顺序</label>
+            <select id="sequenceMode">
+              <option value="mentionFirst">先批量 @ 提及成员，再追加消息正文</option>
+              <option value="textFirst">先写入消息正文，再在末尾批量 @ 提及成员</option>
+            </select>
+          </div>
 
-        <div id="previewText" class="preview-text">👥 待提及名单: 共 0 人</div>
-        <div id="progressText" class="progress-text">📊 状态: 等待运行...</div>
-        <div class="btn-group">
-          <button id="startBtn" class="btn btn-start">▶️ 开始自动化发送</button>
-          <button id="stopBtn" class="btn btn-stop">⏹️ 停止模拟 (Esc)</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="footer-tip">
-    🔒 <b>安全免责说明</b>：本软件完全在本地内存中运行。注意：模拟输入依赖系统剪贴板进行，如果您的系统开启了“剪贴板历史记录”（如 Windows 的 Win+V、macOS 的通用剪贴板 Handoff 或第三方剪贴板管理工具），临时写入的名字和通知可能会被系统底层组件自动捕获记录，敏感环境下请检查或关闭您的系统剪贴板历史设置。<br>
-    🌐 <b>网页版使用指导</b>：如在 Chrome/Edge 浏览器中使用网页版 Teams，运行前请务必确保有且仅有一个浏览器窗口，且 Teams 标签页处于当前激活处于前台状态，以防止操作系统焦点发生窗口粘连和漂移。
-  </div>
+          <div class="speed-row">
+            <label for="speedSlider">自动化速度</label>
+            <input type="range" id="speedSlider" class="speed-slider" min="1" max="10" value="5">
+            <span id="speedLabel" class="speed-label">5 档（1.00x）</span>
+          </div>
 
-  <div id="pauseOverlay" class="pause-overlay">
-    <div class="pause-box">
-      <h3 style="color:#d9383a; margin-top:0;">⚠️ 自动化已安全暂停</h3>
-      <p id="pauseMsg" style="font-size:14px; color:#333; line-height:1.4;"></p>
-      <button id="resumeBtn" class="pause-btn">🔄 我已切回 Teams，继续</button>
-    </div>
-  </div>
+          <div class="mode-row" aria-label="提及模式">
+            <span class="mode-label">提及模式</span>
+            <div class="mode-switch">
+              <button id="modeSafe" class="mode-option active-safe" type="button">稳妥模式</button>
+              <button id="modeTurbo" class="mode-option" type="button">极速模式</button>
+            </div>
+          </div>
+          <div id="modeHint" class="mode-hint">稳妥模式：@ → 左移 → 粘贴 → 1 → 删除 → 回车。Windows 保留 103ms 搜索/缓冲锁。</div>
+
+          <div class="run-summary" aria-live="polite">
+            <div id="previewText" class="preview-text">待提及名单：共 0 人</div>
+            <div id="progressText" class="progress-text">状态：等待运行</div>
+          </div>
+
+          <div class="button-row">
+            <button id="startBtn" class="btn-start" type="button">开始自动化</button>
+            <button id="stopBtn" class="btn-stop" type="button">停止（Esc）</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="footer-tip">
+      <strong>运行提示：</strong>开始前请在安全核对栏确认 Teams 已打开富文本大框；确认后程序将连续执行，请勿切换当前 Teams 聊天或浏览器窗口。如需中止，请使用“停止”按钮或 Esc。敏感信息会暂时经过系统剪贴板，建议按需关闭系统剪贴板历史记录。
+    </aside>
+  </main>
 
   <script>
     const namesInput = document.getElementById('namesInput');
@@ -95,87 +264,123 @@
     const sequenceMode = document.getElementById('sequenceMode');
     const speedSlider = document.getElementById('speedSlider');
     const speedLabel = document.getElementById('speedLabel');
-    const pauseOverlay = document.getElementById('pauseOverlay');
-    const pauseMsg = document.getElementById('pauseMsg');
-    const resumeBtn = document.getElementById('resumeBtn');
+    const modeSafe = document.getElementById('modeSafe');
+    const modeTurbo = document.getElementById('modeTurbo');
+    const modeHint = document.getElementById('modeHint');
 
-    const speedRates = {
-      1: "3.00", 2: "2.28", 3: "1.73", 4: "1.32", 5: "1.00",
-      6: "0.57", 7: "0.32", 8: "0.185", 9: "0.105", 10: "0.06"
+    let turboMode = false;
+    let speedRates = {
+      1: 3.00, 2: 2.28, 3: 1.73, 4: 1.32, 5: 1.00,
+      6: 0.57, 7: 0.32, 8: 0.185, 9: 0.105, 10: 0.06,
     };
+    let saveTimer = null;
 
     function getCleanNames() {
       return namesInput.value.split('\n')
-        .map(n => n.trim())
-        .filter(n => n.length > 0 && !n.startsWith('#'));
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0 && !name.startsWith('#'));
     }
 
-    function updateSpeedUI(val) {
-      speedLabel.innerText = `${val} 档 (${speedRates[val]}x)`;
+    function updateSpeedUI(value) {
+      speedLabel.innerText = `${value} 档（${speedRates[value]}x）`;
     }
 
-    speedSlider.addEventListener('input', (e) => {
-      const val = e.target.value;
-      updateSpeedUI(val);
-      window.teamsEchoAPI.saveSettings({
-        sequenceMode: sequenceMode.value,
-        speedLevel: parseInt(val)
-      });
-    });
-
-    sequenceMode.addEventListener('change', () => {
-      window.teamsEchoAPI.saveSettings({
-        sequenceMode: sequenceMode.value,
-        speedLevel: parseInt(speedSlider.value)
-      });
-    });
-
-    namesInput.addEventListener('input', () => {
+    function updatePreview() {
       const names = getCleanNames();
-      previewText.innerText = `👥 最终会 @ 这些人: ${names.join(', ') || '无'} (共 ${names.length} 人)`;
-    });
+      const sample = names.slice(0, 3).join('、');
+      const suffix = names.length > 3 ? ' 等' : '';
+      previewText.innerText = names.length
+        ? `待提及名单：${sample}${suffix}（共 ${names.length} 人）`
+        : '待提及名单：共 0 人';
+    }
 
-    window.addEventListener('DOMContentLoaded', async () => {
-      const settings = await window.teamsEchoAPI.loadSettings();
-      if (settings) {
-        if (settings.sequenceMode) sequenceMode.value = settings.sequenceMode;
-        if (settings.speedLevel) {
-          speedSlider.value = settings.speedLevel;
-          updateSpeedUI(settings.speedLevel);
-        }
+    function getSettings() {
+      return {
+        sequenceMode: sequenceMode.value,
+        speedLevel: Number.parseInt(speedSlider.value, 10),
+        turboMode,
+      };
+    }
+
+    function updateModeUI() {
+      modeSafe.classList.toggle('active-safe', !turboMode);
+      modeTurbo.classList.toggle('active-turbo', turboMode);
+      modeHint.classList.toggle('turbo', turboMode);
+      modeHint.innerText = turboMode
+        ? '极速模式：@ → 粘贴 → 1 → 删除 → 回车。省去左移以提升速度；同名或相近姓名可能存在误选风险，请先在测试群验证。'
+        : '稳妥模式：@ → 左移 → 粘贴 → 1 → 删除 → 回车。Windows 保留 103ms 搜索/缓冲锁。';
+    }
+
+    function setTurboMode(value) {
+      turboMode = value;
+      updateModeUI();
+      persistSettings(true);
+    }
+
+    function persistSettings(immediate = false) {
+      const save = () => window.teamsEchoAPI.saveSettings(getSettings());
+      window.clearTimeout(saveTimer);
+      if (immediate) {
+        save();
+        return;
       }
+      saveTimer = window.setTimeout(save, 220);
+    }
+
+    speedSlider.addEventListener('input', (event) => {
+      updateSpeedUI(event.target.value);
+      persistSettings();
     });
+    speedSlider.addEventListener('change', () => persistSettings(true));
+    sequenceMode.addEventListener('change', () => persistSettings(true));
+    modeSafe.addEventListener('click', () => setTurboMode(false));
+    modeTurbo.addEventListener('click', () => setTurboMode(true));
+    namesInput.addEventListener('input', updatePreview);
 
     document.getElementById('startBtn').addEventListener('click', () => {
       const names = getCleanNames();
-      if(names.length === 0) { alert('请输入有效名单！'); return; }
+      if (names.length === 0) {
+        alert('请输入有效名单。');
+        return;
+      }
       window.teamsEchoAPI.triggerSafetyCheck({
         names,
         htmlContent: richEditor.innerHTML,
         textContent: richEditor.innerText,
         sequenceMode: sequenceMode.value,
-        speedLevel: parseInt(speedSlider.value)
+        speedLevel: Number.parseInt(speedSlider.value, 10),
+        turboMode,
       });
     });
 
     document.getElementById('stopBtn').addEventListener('click', () => {
       window.teamsEchoAPI.stopAutomation();
-      pauseOverlay.style.display = 'none';
+      progressText.innerText = '状态：正在安全停止当前步骤…';
     });
 
-    window.teamsEchoAPI.onStatusUpdate((msg) => {
-      progressText.innerText = msg;
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') document.getElementById('stopBtn').click();
     });
 
-    window.teamsEchoAPI.onForegroundLost((appName) => {
-      pauseMsg.innerHTML = `检测到前台窗口不包含 Teams 标记：<br><b>「${appName}」</b><br><br>为防文本走火错乱，已为您紧急挂起刹车。`;
-      pauseOverlay.style.display = 'flex';
+    window.teamsEchoAPI.onStatusUpdate((message) => {
+      progressText.innerText = `状态：${message}`;
     });
 
-    resumeBtn.addEventListener('click', () => {
-      pauseOverlay.style.display = 'none';
-      window.teamsEchoAPI.resumeAfterForegroundLost();
+    window.addEventListener('DOMContentLoaded', async () => {
+      const [profile, settings] = await Promise.all([
+        window.teamsEchoAPI.getRuntimeProfile(),
+        window.teamsEchoAPI.loadSettings(),
+      ]);
+      if (profile?.speedRates) speedRates = profile.speedRates;
+      if (settings?.sequenceMode) sequenceMode.value = settings.sequenceMode;
+      if (settings?.speedLevel) speedSlider.value = settings.speedLevel;
+      turboMode = Boolean(settings?.turboMode);
+      updateSpeedUI(speedSlider.value);
+      updateModeUI();
+      updatePreview();
     });
+
+    window.addEventListener('beforeunload', () => persistSettings(true));
   </script>
 </body>
 </html>

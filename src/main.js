@@ -1,53 +1,118 @@
 const { app, BrowserWindow, ipcMain, clipboard, dialog } = require('electron');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
-// 统一的 Windows PowerShell 执行器：把脚本写入临时 .ps1 文件后用 -File 方式执行，
-// 彻底避免把带 here-string / 双引号的多行脚本硬压成单行塞进 -Command "..."
-// 所引发的换行丢失、引号错位等一系列脆弱问题。执行完毕后静默清理临时文件。
+// 经验证的基准时序锁：重构不得缩短、合并或删除。
+const TIMING_LOCKS = Object.freeze({
+  mentionStep: 60,
+  mentionResult: 150,
+  mentionConfirm: 180,
+  richTextSwitch: 80,
+  lineBreak: 100,
+  postBreak: 150,
+  windowsFallbackActivation: 350,
+  // Windows 稳妥模式中已验证的搜索/缓冲锁；极速模式不使用此锁。
+  stableSearchBuffer: 103,
+  clipboardRestore: 500,
+});
+
+const WINDOWS_SPEED_RATES = Object.freeze({
+  1: 3.00, 2: 2.28, 3: 1.73, 4: 1.32, 5: 1.00,
+  6: 0.57, 7: 0.32, 8: 0.185, 9: 0.105, 10: 0.06,
+});
+
+// macOS 保留 1–10 档；仅平滑 9、10 档的加速幅度。
+const MACOS_SPEED_RATES = Object.freeze({
+  ...WINDOWS_SPEED_RATES,
+  9: 0.145,
+  10: 0.115,
+});
+
+const VALID_SEQUENCE_MODES = new Set(['mentionFirst', 'textFirst']);
+const PROGRESS_INTERVAL = 3;
+
+let mainWindow;
+let safetyWindow;
+let isStopping = false;
+let currentAutomationData = null;
+let settingsWriteQueue = Promise.resolve();
+
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+function getSpeedRates() {
+  return process.platform === 'darwin' ? MACOS_SPEED_RATES : WINDOWS_SPEED_RATES;
+}
+
+// 保持原有“逐项乘倍率、四舍五入、最低 1ms”的时序规则。
+function getScaledDelay(ms, level) {
+  return Math.max(1, Math.round(ms * (getSpeedRates()[level] || 1.00)));
+}
+
+function normalizeSettings(settings) {
+  const requestedLevel = Number.parseInt(settings?.speedLevel, 10);
+  return {
+    sequenceMode: VALID_SEQUENCE_MODES.has(settings?.sequenceMode)
+      ? settings.sequenceMode
+      : 'mentionFirst',
+    speedLevel: Number.isInteger(requestedLevel)
+      ? Math.min(10, Math.max(1, requestedLevel))
+      : 5,
+    turboMode: Boolean(settings?.turboMode),
+  };
+}
+
 function runWindowsPowerShell(scriptContent) {
   return new Promise((resolve) => {
     const tmpFile = path.join(
       os.tmpdir(),
-      `teamsecho_ps_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`
+      `teamsecho_ps_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`,
     );
-    try {
-      fs.writeFileSync(tmpFile, scriptContent, 'utf8');
-    } catch (e) {
-      resolve({ err: e, stdout: '' });
-      return;
-    }
-    exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`, (err, stdout) => {
-      fs.unlink(tmpFile, () => {});
+
+    fs.writeFile(tmpFile, scriptContent, 'utf8', (writeError) => {
+      if (writeError) {
+        resolve({ err: writeError, stdout: '' });
+        return;
+      }
+
+      // 参数化调用保留现有透明脚本内容，避免经由 shell 拼接命令行。
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', tmpFile],
+        { windowsHide: false },
+        (err, stdout) => {
+          fs.unlink(tmpFile, () => {});
+          resolve({ err, stdout });
+        },
+      );
+    });
+  });
+}
+
+function runAppleScript(scriptContent) {
+  return new Promise((resolve) => {
+    execFile('osascript', ['-e', scriptContent], (err, stdout) => {
       resolve({ err, stdout });
     });
   });
 }
 
-let mainWindow;
-let safetyWindow;
-let isStopping = false;
-let isPausedForForeground = false;
-let currentAutomationData = null;
-
-// 持久化配置文件路径
-const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-
-// 几何插值物理倍率映射函数
-const speedRates = {
-  1: 3.00, 2: 2.28, 3: 1.73, 4: 1.32, 5: 1.00,
-  6: 0.57, 7: 0.32, 8: 0.185, 9: 0.105, 10: 0.06
-};
-
-// 工具函数：获取当前档位缩放后的延迟数值，四舍五入，最低1ms兜底
-function getScaledDelay(ms, level) {
-  const rate = speedRates[level] || 1.00;
-  return Math.max(1, Math.round(ms * rate));
+function sendToMain(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
 }
 
-function createWindow () {
+function queueSettingsSave(settings) {
+  const serializedSettings = JSON.stringify(normalizeSettings(settings), null, 2);
+  settingsWriteQueue = settingsWriteQueue
+    .catch(() => {})
+    .then(() => fs.promises.writeFile(settingsPath, serializedSettings, 'utf8'))
+    .catch((error) => console.error('保存设置失败：', error));
+}
+
+function createWindow() {
   mainWindow = new BrowserWindow({
     width: 900,
     height: 600,
@@ -56,169 +121,97 @@ function createWindow () {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-    }
+    },
   });
-  mainWindow.loadFile('src/index.html');
-  mainWindow.on('close', (e) => {
+
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.on('close', (event) => {
     const choice = dialog.showMessageBoxSync(mainWindow, {
       type: 'question',
       buttons: ['确认退出', '取消'],
       title: '确认退出？',
-      message: '安全提示：退出后当前输入的所有消息及名单将在内存中彻底销毁，软件不留任何本地草稿。'
+      message: '安全提示：退出后当前输入的所有消息及名单将在内存中彻底销毁，软件不留任何本地草稿。',
     });
-    if (choice === 1) e.preventDefault();
+    if (choice === 1) event.preventDefault();
   });
 }
 
 app.whenReady().then(createWindow);
 
-// IPC 状态持久化处理
-ipcMain.handle('load-settings', () => {
+ipcMain.handle('load-settings', async () => {
   try {
-    if (fs.existsSync(settingsPath)) {
-      return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    }
-  } catch (e) { console.error(e); }
-  return null;
+    const savedSettings = await fs.promises.readFile(settingsPath, 'utf8');
+    return normalizeSettings(JSON.parse(savedSettings));
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('读取设置失败：', error);
+    return null;
+  }
 });
 
-ipcMain.on('save-settings', (event, settings) => {
-  try {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
-  } catch (e) { console.error(e); }
+ipcMain.handle('get-runtime-profile', () => ({
+  platform: process.platform,
+  speedRates: getSpeedRates(),
+}));
+
+ipcMain.on('save-settings', (_event, settings) => {
+  queueSettingsSave(settings);
 });
 
-// 通配获取前台活动窗口标题/进程名称
-function getFrontmostAppName() {
-  return new Promise((resolve) => {
-    if (process.platform === 'darwin') {
-      const script = `
-        tell application "System Events"
-          set frontProcess to first application process whose frontmost is true
-          set windowTitle to ""
-          try
-            if (count of windows of frontProcess) > 0 then
-              set windowTitle to name of first window of frontProcess
+function getMacFrontmostSnapshot() {
+  const script = `
+    tell application "System Events"
+      set frontProcess to first application process whose frontmost is true
+      set windowTitle to ""
+      try
+        if (count of windows of frontProcess) > 0 then
+          set windowTitle to name of first window of frontProcess
+        end if
+      end try
+      return (name of frontProcess) & "||" & windowTitle
+    end tell
+  `;
+  return runAppleScript(script);
+}
+
+function activateMacTeams() {
+  const script = `
+    tell application "System Events"
+      set targetProc to missing value
+      set targetWin to missing value
+      repeat with proc in (application processes whose background only is false)
+        try
+          repeat with w in windows of proc
+            if name of w contains "Teams" then
+              set targetProc to proc
+              set targetWin to w
+              exit repeat
             end if
-          end try
-          return (name of frontProcess) & "||" & windowTitle
-        end tell
-      `;
-      exec(`osascript -e '${script}'`, (err, stdout) => {
-        resolve(err ? '' : stdout.trim());
-      });
-    } else {
-      const psScript = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class Win32 {
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-}
-"@
-
-$h = [Win32]::GetForegroundWindow()
-$sb = New-Object System.Text.StringBuilder 256
-[Win32]::GetWindowText($h, $sb, 256) | Out-Null
-$procId = 0
-[Win32]::GetWindowThreadProcessId($h, [ref]$procId) | Out-Null
-$p = Get-Process -Id $procId -ErrorAction SilentlyContinue
-if ($p) { Write-Output ($p.ProcessName + "||" + $sb.ToString()) } else { Write-Output ("||" + $sb.ToString()) }
-`;
-      runWindowsPowerShell(psScript).then(({ err, stdout }) => {
-        resolve(err ? '' : stdout.trim());
-      });
-    }
-  });
-}
-
-// 核心优化状态机：记录“上一次确认前台确实是 Teams 上下文”的状态。
-let lastKnownTeamsContext = false;
-
-// 网页版 + 客户端多维立体白名单放行校验（状态化高级容错）
-function isForegroundTeams(rawInfo) {
-  if (!rawInfo) return false;
-
-  const [procNameRaw, titleRaw] = rawInfo.split('||');
-  const procName = (procNameRaw || '').toLowerCase().trim();
-  const title = (titleRaw || '').toLowerCase().trim();
-
-  if (/teams/.test(title)) {
-    lastKnownTeamsContext = true;
-    return true;
-  }
-
-  const isBrowserProc = /chrome|msedge/.test(procName);
-  const titleUnreadable = title === '' || title === '未知窗口';
-
-  if (isBrowserProc && titleUnreadable && lastKnownTeamsContext) {
-    return true;
-  }
-
-  lastKnownTeamsContext = false;
-  return false;
-}
-
-function activateTargetTarget(rawInfo) {
-  return new Promise((resolve) => {
-    const isChrome = /chrome/i.test(rawInfo);
-    const isEdge = /edge/i.test(rawInfo) || /msedge/i.test(rawInfo);
-
-    if (process.platform === 'darwin') {
-      const macFallbackApp = isChrome ? 'Google Chrome' : (isEdge ? 'Microsoft Edge' : 'Microsoft Teams');
-      const script = `
-        tell application "System Events"
-          set targetProc to missing value
-          set targetWin to missing value
-          repeat with proc in (application processes whose background only is false)
-            try
-              repeat with w in windows of proc
-                if name of w contains "Teams" then
-                  set targetProc to proc
-                  set targetWin to w
-                  exit repeat
-                end if
-              end repeat
-            end try
-            if targetProc is not missing value then exit repeat
           end repeat
-          if targetProc is not missing value then
-            set frontmost of targetProc to true
-            try
-              perform action "AXRaise" of targetWin
-            end try
-          else
-            tell application "${macFallbackApp}" to activate
-          end if
-        end tell
-      `;
-      exec(`osascript -e '${script.replace(/'/g, "'\\''")}'`, () => resolve());
-    } else {
-      let targetProc = '';
-      let excludeProc = '';
-      if (isChrome) {
-        targetProc = 'chrome';
-      } else if (isEdge) {
-        targetProc = 'msedge';
-      } else {
-        excludeProc = 'chrome,msedge';
-      }
+        end try
+        if targetProc is not missing value then exit repeat
+      end repeat
+      if targetProc is not missing value then
+        set frontmost of targetProc to true
+        try
+          perform action "AXRaise" of targetWin
+        end try
+      else
+        tell application "Microsoft Teams" to activate
+      end if
+    end tell
+  `;
+  return runAppleScript(script);
+}
 
-      const formattedExclude = excludeProc ? excludeProc.split(',').map(s => `"${s}"`).join(',') : '';
-
-      const psScript = `
+function activateWindowsChromeTeams() {
+  const psScript = `
 Add-Type @"
 using System;
 using System.Text;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-public class WinFinder {
+public class TeamsChromeFinder {
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
     [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
@@ -227,44 +220,29 @@ public class WinFinder {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-
     public static IntPtr FoundHandle = IntPtr.Zero;
-    public static string TargetProc = "";
-    public static string TitleContains = "teams";
-    public static string[] ExcludeProcs = new string[0];
 
     public static bool Callback(IntPtr hWnd, IntPtr lParam) {
         if (!IsWindowVisible(hWnd)) return true;
         int len = GetWindowTextLength(hWnd);
         if (len == 0) return true;
-        var sb = new StringBuilder(len + 1);
-        GetWindowText(hWnd, sb, sb.Capacity);
-        string title = sb.ToString();
-        if (title.ToLower().IndexOf(TitleContains.ToLower()) < 0) return true;
-
+        var titleBuilder = new StringBuilder(len + 1);
+        GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+        if (titleBuilder.ToString().IndexOf("teams", StringComparison.OrdinalIgnoreCase) < 0) return true;
         uint pid;
         GetWindowThreadProcessId(hWnd, out pid);
-        string procName = "";
         try {
-            var p = System.Diagnostics.Process.GetProcessById((int)pid);
-            procName = p.ProcessName.ToLower();
-        } catch { return true; }
-
-        if (!string.IsNullOrEmpty(TargetProc) && procName.IndexOf(TargetProc.ToLower()) < 0) return true;
-
-        foreach (var ex in ExcludeProcs) {
-            if (!string.IsNullOrEmpty(ex) && procName.IndexOf(ex.ToLower()) >= 0) return true;
+            var process = System.Diagnostics.Process.GetProcessById((int)pid);
+            if (process.ProcessName.IndexOf("chrome", StringComparison.OrdinalIgnoreCase) < 0) return true;
+        } catch {
+            return true;
         }
-
         FoundHandle = hWnd;
         return false;
     }
 
-    public static IntPtr Find(string targetProc, string titleContains, string[] excludeProcs) {
+    public static IntPtr Find() {
         FoundHandle = IntPtr.Zero;
-        TargetProc = targetProc;
-        TitleContains = titleContains;
-        ExcludeProcs = excludeProcs;
         EnumWindows(new EnumWindowsProc(Callback), IntPtr.Zero);
         return FoundHandle;
     }
@@ -277,79 +255,87 @@ public class WinFinder {
 }
 "@
 
-$excludeArr = @(${formattedExclude})
-$hwnd = [WinFinder]::Find("${targetProc}", "teams", $excludeArr)
+$hwnd = [TeamsChromeFinder]::Find()
 if ($hwnd -ne [IntPtr]::Zero) {
-    [WinFinder]::Activate($hwnd) | Out-Null
+    [TeamsChromeFinder]::Activate($hwnd) | Out-Null
 } else {
-    $w = New-Object -ComObject Wscript.Shell
-    $activated = $false
-
-    if ("${isChrome ? '1' : '0'}" -eq "1") {
-        $activated = $w.AppActivate('Chrome')
-    } elseif ("${isEdge ? '1' : '0'}" -eq "1") {
-        $activated = $w.AppActivate('Edge')
-    }
-
-    if (-not $activated) {
-        $activated = $w.AppActivate('Teams')
-    }
-
-    Start-Sleep -m 350
-    $hwnd2 = [WinFinder]::Find("${targetProc}", "teams", $excludeArr)
-    if ($hwnd2 -ne [IntPtr]::Zero) {
-        [WinFinder]::Activate($hwnd2) | Out-Null
+    $shell = New-Object -ComObject Wscript.Shell
+    $shell.AppActivate('Chrome') | Out-Null
+    Start-Sleep -m ${TIMING_LOCKS.windowsFallbackActivation}
+    $fallbackHwnd = [TeamsChromeFinder]::Find()
+    if ($fallbackHwnd -ne [IntPtr]::Zero) {
+        [TeamsChromeFinder]::Activate($fallbackHwnd) | Out-Null
     }
 }
 `;
-      runWindowsPowerShell(psScript).then(() => resolve());
-    }
-  });
+  return runWindowsPowerShell(psScript);
 }
 
-async function ensureForegroundOrPause() {
-  const rawInfo = await getFrontmostAppName();
-  if (isForegroundTeams(rawInfo)) return true;
+// 运行目标由平台配置决定，不再依据 TeamsEcho 取得焦点后的窗口标题进行猜测。
+async function prepareConfirmedTarget() {
+  sendToMain(
+    'status-update',
+    process.platform === 'darwin'
+      ? '正在定位 Microsoft Teams 窗口…'
+      : '正在定位 Chrome 中的 Teams 窗口…',
+  );
 
-  const displayTitle = rawInfo.split('||')[1] || rawInfo.split('||')[0] || '未知窗口';
-  isPausedForForeground = true;
-  mainWindow.webContents.send('foreground-lost', displayTitle);
-  mainWindow.webContents.send('status-update', `⏸️ 检测到前台已切换到「${displayTitle}」，自动化已暂停，等待确认。`);
+  const result = process.platform === 'darwin'
+    ? await activateMacTeams()
+    : await activateWindowsChromeTeams();
 
-  await new Promise((resolve) => {
-    const onResume = () => {
-      ipcMain.removeListener('resume-after-foreground-lost', onResume);
-      resolve();
-    };
-    ipcMain.on('resume-after-foreground-lost', onResume);
-  });
-
-  await activateTargetTarget(rawInfo);
-  isPausedForForeground = false;
+  if (result.err) console.error('准备 Teams 目标失败：', result.err);
   return !isStopping;
 }
 
-function runPlatformKeystrokeForPerson(name, speedLevel) {
-  return new Promise(async (resolve) => {
-    clipboard.writeText(name);
+function shouldPublishProgress(index, total) {
+  return index === 0 || index === total - 1 || (index + 1) % PROGRESS_INTERVAL === 0;
+}
 
-    const d60 = getScaledDelay(60, speedLevel) / 1000;
-    const d150 = getScaledDelay(150, speedLevel) / 1000;
-    const d180 = getScaledDelay(180, speedLevel) / 1000;
+async function checkAndMentionOnce(name, speedLevel, turboMode) {
+  clipboard.writeText(name);
 
-    const win60 = getScaledDelay(60, speedLevel);
-    const win150 = getScaledDelay(150, speedLevel);
-    const win180 = getScaledDelay(180, speedLevel);
+  const scaledSearchDelay = getScaledDelay(TIMING_LOCKS.mentionResult, speedLevel);
+  // 仅极速 9 档：候选搜索等待不低于极速 8 档已验证值；其余档位与模式不变。
+  const turboNineSearchFloor = turboMode && speedLevel === 9
+    ? getScaledDelay(TIMING_LOCKS.mentionResult, 8)
+    : 0;
+  const searchReadyDelay = Math.max(scaledSearchDelay, turboNineSearchFloor);
+  const d60 = getScaledDelay(TIMING_LOCKS.mentionStep, speedLevel) / 1000;
+  const d150 = searchReadyDelay / 1000;
+  const d180 = getScaledDelay(TIMING_LOCKS.mentionConfirm, speedLevel) / 1000;
+  const win60 = getScaledDelay(TIMING_LOCKS.mentionStep, speedLevel);
+  const win150 = searchReadyDelay;
+  const win180 = getScaledDelay(TIMING_LOCKS.mentionConfirm, speedLevel);
 
-    const rawInfo = await getFrontmostAppName();
-
-    if (process.platform === 'darwin') {
-      const script = `
+  // 稳妥模式：@ → 左移 → 粘贴 → 1 → 删除 → 回车。
+  // 极速模式：@ → 粘贴 → 1 → 删除 → 回车。
+  // 每位成员的前台确认与键序放入同一脚本，恢复发布版的连续执行节奏。
+  if (process.platform === 'darwin') {
+    const stableLeftStep = turboMode ? '' : `
+          delay ${d60}
+          key code 123`;
+    const result = await runAppleScript(`
+      set isTeams to false
+      tell application "System Events"
+        set frontProcess to first application process whose frontmost is true
+        set procName to name of frontProcess
+        set windowTitle to ""
+        try
+          if (count of windows of frontProcess) > 0 then
+            set windowTitle to name of first window of frontProcess
+          end if
+        end try
+      end tell
+      ignoring case
+        if (procName contains "teams") or (windowTitle contains "teams") then
+          set isTeams to true
+        end if
+      end ignoring
+      if isTeams then
         delay ${d60}
         tell application "System Events"
-          keystroke "@"
-          delay ${d60}
-          key code 123
+          keystroke "@"${stableLeftStep}
           delay ${d60}
           keystroke "v" using command down
           delay ${d150}
@@ -360,211 +346,235 @@ function runPlatformKeystrokeForPerson(name, speedLevel) {
           key code 36
           delay ${d60}
         end tell
-      `;
-      await activateTargetTarget(rawInfo);
-      exec(`osascript -e '${script}'`, () => resolve());
-    } else {
-      const psScript = `
-$wshell = New-Object -ComObject Wscript.Shell
+        "OK"
+      else
+        "NOT_TEAMS"
+      end if
+    `);
+    return result.err ? '' : result.stdout.trim();
+  }
+
+  // Windows 仅识别用户指定的 Chrome 网页 Teams；不匹配时跳过，不暂停、不注入。
+  const afterDelete = turboMode
+    ? win180
+    : Math.max(win180, TIMING_LOCKS.stableSearchBuffer);
+  const stableLeftStep = turboMode ? '' : `
 Start-Sleep -m ${win60}
-$wshell.SendKeys("@")
-Start-Sleep -m ${win60}
-$wshell.SendKeys("{LEFT}")
-Start-Sleep -m ${win60}
-$wshell.SendKeys("^v")
-Start-Sleep -m ${win150}
-$wshell.SendKeys("1")
-Start-Sleep -m ${win60}
-$wshell.SendKeys("{BACKSPACE}")
-Start-Sleep -m ${win180}
-$wshell.SendKeys("{ENTER}")
-`;
-      await activateTargetTarget(rawInfo);
-      runWindowsPowerShell(psScript).then(() => resolve());
-    }
-  });
+$wshell.SendKeys("{LEFT}")`;
+  const result = await runWindowsPowerShell(`
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class TeamsForeground {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+}
+"@
+
+$handle = [TeamsForeground]::GetForegroundWindow()
+$titleBuilder = New-Object System.Text.StringBuilder 256
+[TeamsForeground]::GetWindowText($handle, $titleBuilder, 256) | Out-Null
+$processId = 0
+[TeamsForeground]::GetWindowThreadProcessId($handle, [ref]$processId) | Out-Null
+$process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+$processName = if ($process) { $process.ProcessName } else { "" }
+$title = $titleBuilder.ToString()
+
+if ($processName -match "(?i)chrome" -and $title -match "(?i)teams") {
+    $wshell = New-Object -ComObject Wscript.Shell
+    Start-Sleep -m ${win60}
+    $wshell.SendKeys("@")${stableLeftStep}
+    Start-Sleep -m ${win60}
+    $wshell.SendKeys("^v")
+    Start-Sleep -m ${win150}
+    $wshell.SendKeys("1")
+    Start-Sleep -m ${win60}
+    $wshell.SendKeys("{BACKSPACE}")
+    Start-Sleep -m ${afterDelete}
+    $wshell.SendKeys("{ENTER}")
+    Write-Output "OK"
+} else {
+    Write-Output "NOT_TEAMS"
+}
+`);
+  return result.err ? '' : result.stdout.trim();
 }
 
-function pasteRichContent(speedLevel) {
-  return new Promise(async (resolve) => {
-    const d150 = getScaledDelay(150, speedLevel) / 1000;
-    const win150 = getScaledDelay(150, speedLevel);
-    const rawInfo = await getFrontmostAppName();
+async function pasteRichContent(speedLevel) {
+  const d150 = getScaledDelay(TIMING_LOCKS.mentionResult, speedLevel) / 1000;
+  const win150 = getScaledDelay(TIMING_LOCKS.mentionResult, speedLevel);
 
-    if (process.platform === 'darwin') {
-      const script = `
-        delay ${d150}
-        tell application "System Events" to keystroke "v" using command down
-      `;
-      await activateTargetTarget(rawInfo);
-      exec(`osascript -e '${script}'`, () => resolve());
-    } else {
-      const psScript = `
+  if (process.platform === 'darwin') {
+    await runAppleScript(`
+      delay ${d150}
+      tell application "System Events" to keystroke "v" using command down
+    `);
+  } else {
+    await runWindowsPowerShell(`
 $w = New-Object -ComObject Wscript.Shell
 Start-Sleep -m ${win150}
 $w.SendKeys('^v')
-`;
-      await activateTargetTarget(rawInfo);
-      runWindowsPowerShell(psScript).then(() => resolve());
-    }
-  });
+`);
+  }
 }
 
-function safeLineBreak(speedLevel) {
-  return new Promise(async (resolve) => {
-    const d100 = getScaledDelay(100, speedLevel) / 1000;
-    const win100 = getScaledDelay(100, speedLevel);
-    const rawInfo = await getFrontmostAppName();
+async function safeLineBreak(speedLevel) {
+  const d100 = getScaledDelay(TIMING_LOCKS.lineBreak, speedLevel) / 1000;
+  const win100 = getScaledDelay(TIMING_LOCKS.lineBreak, speedLevel);
 
-    if (process.platform === 'darwin') {
-      const script = `
-        delay ${d100}
-        tell application "System Events" to keystroke return using shift down
-      `;
-      await activateTargetTarget(rawInfo);
-      exec(`osascript -e '${script}'`, () => resolve());
-    } else {
-      const psScript = `
+  if (process.platform === 'darwin') {
+    await runAppleScript(`
+      delay ${d100}
+      tell application "System Events" to keystroke return using shift down
+    `);
+  } else {
+    await runWindowsPowerShell(`
 $w = New-Object -ComObject Wscript.Shell
 Start-Sleep -m ${win100}
 $w.SendKeys('+{ENTER}')
-`;
-      await activateTargetTarget(rawInfo);
-      runWindowsPowerShell(psScript).then(() => resolve());
-    }
-  });
+`);
+  }
 }
 
-ipcMain.on('trigger-safety-check', async (event, data) => {
-  currentAutomationData = data;
-  const rawInfo = await getFrontmostAppName();
-  await activateTargetTarget(rawInfo);
-
-  if (safetyWindow) { safetyWindow.focus(); return; }
+function openSafetyWindow(turboMode) {
+  if (safetyWindow) {
+    safetyWindow.webContents.send('safety-mode-info', Boolean(turboMode));
+    safetyWindow.focus();
+    return;
+  }
 
   safetyWindow = new BrowserWindow({
     width: 560,
-    height: 410,
+    height: 390,
     useContentSize: true,
     parent: mainWindow,
     modal: true,
     alwaysOnTop: true,
     resizable: false,
     frame: true,
-    title: "安全核对栏",
+    title: '安全核对栏',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-    }
+    },
   });
 
-  safetyWindow.loadFile('src/safety.html');
-  safetyWindow.on('closed', () => { safetyWindow = null; });
-});
+  safetyWindow.loadFile(path.join(__dirname, 'safety.html'));
+  safetyWindow.webContents.once('did-finish-load', () => {
+    safetyWindow.webContents.send('safety-mode-info', Boolean(turboMode));
+  });
+  safetyWindow.on('closed', () => {
+    safetyWindow = null;
+  });
+}
 
-ipcMain.on('safety-response', async (event, responseType) => {
-  if (responseType === 'cancel') {
-    if (safetyWindow) safetyWindow.close();
-    mainWindow.webContents.send('status-update', '❌ 操作已被安全取消，未向 Teams 写入任何数据。');
-    return;
-  }
+async function switchToRichTextInput() {
+  const currentLevel = currentAutomationData?.speedLevel || 5;
+  const d80 = getScaledDelay(TIMING_LOCKS.richTextSwitch, currentLevel) / 1000;
+  const win80 = getScaledDelay(TIMING_LOCKS.richTextSwitch, currentLevel);
 
-  if (responseType === 'switch') {
-    const currentLevel = currentAutomationData ? (currentAutomationData.speedLevel || 5) : 5;
-    const d80 = getScaledDelay(80, currentLevel) / 1000;
-    const win80 = getScaledDelay(80, currentLevel);
-    const rawInfo = await getFrontmostAppName();
+  await prepareConfirmedTarget();
+  if (isStopping) return;
 
-    if (process.platform === 'darwin') {
-      await activateTargetTarget(rawInfo);
-      exec(`osascript -e 'delay ${d80}\ntell application "System Events" to keystroke "x" using {command down, shift down}'`);
-    } else {
-      await activateTargetTarget(rawInfo);
-      runWindowsPowerShell(`
+  if (process.platform === 'darwin') {
+    await runAppleScript(`delay ${d80}\ntell application "System Events" to keystroke "x" using {command down, shift down}`);
+  } else {
+    await runWindowsPowerShell(`
 $w = New-Object -ComObject Wscript.Shell
 Start-Sleep -m ${win80}
 $w.SendKeys('^+x')
 `);
+  }
+}
+
+async function runMentionPass(names, speedLevel, turboMode) {
+  for (let index = 0; index < names.length; index += 1) {
+    if (isStopping) break;
+
+    if (shouldPublishProgress(index, names.length)) {
+      sendToMain('status-update', `正在粘贴提及：${names[index]}（${index + 1}/${names.length}）`);
     }
+
+    const result = await checkAndMentionOnce(names[index], speedLevel, turboMode);
+    if (isStopping) break;
+    if (result !== 'OK') {
+      sendToMain('status-update', `未在 Teams 目标窗口中，已跳过：${names[index]}（${index + 1}/${names.length}）`);
+    }
+  }
+}
+
+ipcMain.on('trigger-safety-check', (_event, data) => {
+  currentAutomationData = data;
+  isStopping = false;
+  openSafetyWindow(Boolean(data?.turboMode));
+});
+
+ipcMain.on('safety-response', async (_event, responseType) => {
+  if (responseType === 'cancel') {
+    if (safetyWindow) safetyWindow.close();
+    currentAutomationData = null;
+    sendToMain('status-update', '操作已取消，未向 Teams 写入任何数据。');
     return;
   }
 
-  if (responseType === 'confirm') {
-    if (safetyWindow) safetyWindow.close();
-    if (!currentAutomationData) return;
+  if (responseType === 'switch') {
+    await switchToRichTextInput();
+    return;
+  }
 
-    const { names, htmlContent, textContent, sequenceMode, speedLevel } = currentAutomationData;
-    const currentLevel = speedLevel || 5;
-    isStopping = false;
-    const originalClipboard = clipboard.readText();
+  if (responseType !== 'confirm' || !currentAutomationData) return;
+  if (safetyWindow) safetyWindow.close();
 
-    mainWindow.webContents.send('status-update', '🚀 自动化开始执行...');
+  const { names, htmlContent, textContent, sequenceMode, speedLevel, turboMode } = currentAutomationData;
+  const currentLevel = Math.min(10, Math.max(1, Number.parseInt(speedLevel, 10) || 5));
+  const hasContent = Boolean(textContent && textContent.trim().length > 0);
+  const postBreakWait = getScaledDelay(TIMING_LOCKS.postBreak, currentLevel);
+  const originalClipboard = clipboard.readText();
+  isStopping = false;
 
-    const runMentionPass = async () => {
-      for (let i = 0; i < names.length; i++) {
-        if (isStopping) break;
-        const ok = await ensureForegroundOrPause();
-        if (!ok) break;
-        mainWindow.webContents.send('status-update', `📈 正在粘贴提及：${names[i]} (${i + 1}/${names.length})`);
-        await runPlatformKeystrokeForPerson(names[i], currentLevel);
-      }
-    };
-
-    const hasContent = !!(textContent && textContent.trim().length > 0);
-    const postBreakWait = getScaledDelay(150, currentLevel);
+  try {
+    sendToMain('status-update', '自动化开始执行。');
+    // 关闭安全核对窗口后仅做一次初始定位；后续每位成员在同一脚本内确认前台并执行键序。
+    if (!await prepareConfirmedTarget()) return;
+    sendToMain('status-update', '正在按发布版连续节奏执行。');
 
     if (sequenceMode === 'mentionFirst') {
-      await runMentionPass();
+      await runMentionPass(names, currentLevel, Boolean(turboMode));
       if (!isStopping && hasContent) {
-        const ok = await ensureForegroundOrPause();
-        if (ok) {
-          await safeLineBreak(currentLevel);
-          await new Promise(res => setTimeout(res, postBreakWait));
-          const okBeforePaste = await ensureForegroundOrPause();
-          if (okBeforePaste) {
-            clipboard.write({ html: htmlContent, text: textContent });
-            await pasteRichContent(currentLevel);
-          }
-        }
-      }
-    } else {
-      if (hasContent) {
-        mainWindow.webContents.send('status-update', '🔗 正在注入消息正文内容...');
-        const okBeforeBody = await ensureForegroundOrPause();
-        if (okBeforeBody) {
+        await safeLineBreak(currentLevel);
+        await new Promise((resolve) => setTimeout(resolve, postBreakWait));
+        if (!isStopping) {
           clipboard.write({ html: htmlContent, text: textContent });
           await pasteRichContent(currentLevel);
-
-          const okBeforeBreak = await ensureForegroundOrPause();
-          if (okBeforeBreak) {
-            await safeLineBreak(currentLevel);
-            await new Promise(res => setTimeout(res, postBreakWait));
-            await runMentionPass();
-          }
         }
-      } else {
-        mainWindow.webContents.send('status-update', '⚠️ 未检测到有效正文内容，跳过粘贴步骤，直接开始 @ 提及...');
-        await runMentionPass();
       }
-    }
-
-    if (isStopping) {
-      mainWindow.webContents.send('status-update', '⏹️ 自动化已被中途按键强行安全切断。');
+    } else if (hasContent) {
+      sendToMain('status-update', '正在粘贴消息正文内容。');
+      clipboard.write({ html: htmlContent, text: textContent });
+      await pasteRichContent(currentLevel);
+      if (!isStopping) {
+        await safeLineBreak(currentLevel);
+        await new Promise((resolve) => setTimeout(resolve, postBreakWait));
+        if (!isStopping) await runMentionPass(names, currentLevel);
+      }
     } else {
-      mainWindow.webContents.send('status-update', '✅ 自动化执行完毕。');
+      sendToMain('status-update', '未检测到有效正文内容，跳过粘贴步骤，直接开始 @ 提及。');
+      await runMentionPass(names, currentLevel, Boolean(turboMode));
     }
 
-    // 零痕迹纵深防御：立刻物理擦除任务残留
+    sendToMain('status-update', isStopping ? '自动化已停止。' : '自动化执行完毕。');
+  } catch (error) {
+    console.error('自动化执行失败：', error);
+    sendToMain('status-update', '自动化执行出现异常，已停止。请检查 Teams 窗口后重试。');
+  } finally {
     currentAutomationData = null;
-
-    setTimeout(() => { clipboard.writeText(originalClipboard); }, 500);
+    setTimeout(() => clipboard.writeText(originalClipboard), TIMING_LOCKS.clipboardRestore);
   }
 });
 
 ipcMain.on('stop-automation', () => {
   isStopping = true;
-  if (isPausedForForeground) {
-    ipcMain.emit('resume-after-foreground-lost');
-  }
 });
