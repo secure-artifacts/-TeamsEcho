@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, clipboard, dialog, screen } = require('electron');
 const path = require('path');
 const { execFile } = require('child_process');
 const fs = require('fs');
@@ -32,12 +32,18 @@ const MACOS_SPEED_RATES = Object.freeze({
 
 const VALID_SEQUENCE_MODES = new Set(['mentionFirst', 'textFirst']);
 const PROGRESS_INTERVAL = 3;
+const DEFAULT_WINDOW_BOUNDS = Object.freeze({ width: 900, height: 600 });
+const MIN_WINDOW_WIDTH = 760;
+const MIN_WINDOW_HEIGHT = 520;
+const WINDOW_STATE_SAVE_DELAY = 250;
 
 let mainWindow;
 let safetyWindow;
 let isStopping = false;
 let currentAutomationData = null;
 let settingsWriteQueue = Promise.resolve();
+let windowStateSaveTimer = null;
+let storedSettings;
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 
@@ -50,6 +56,15 @@ function getScaledDelay(ms, level) {
   return Math.max(1, Math.round(ms * (getSpeedRates()[level] || 1.00)));
 }
 
+function normalizeWindowBounds(bounds) {
+  const width = Number.parseInt(bounds?.width, 10);
+  const height = Number.parseInt(bounds?.height, 10);
+  return {
+    width: Number.isInteger(width) ? Math.max(MIN_WINDOW_WIDTH, width) : DEFAULT_WINDOW_BOUNDS.width,
+    height: Number.isInteger(height) ? Math.max(MIN_WINDOW_HEIGHT, height) : DEFAULT_WINDOW_BOUNDS.height,
+  };
+}
+
 function normalizeSettings(settings) {
   const requestedLevel = Number.parseInt(settings?.speedLevel, 10);
   return {
@@ -60,6 +75,37 @@ function normalizeSettings(settings) {
       ? Math.min(10, Math.max(1, requestedLevel))
       : 5,
     turboMode: Boolean(settings?.turboMode),
+    windowBounds: normalizeWindowBounds(settings?.windowBounds),
+  };
+}
+
+function loadStoredSettings() {
+  try {
+    return normalizeSettings(JSON.parse(fs.readFileSync(settingsPath, 'utf8')));
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('读取设置失败：', error);
+    return normalizeSettings(null);
+  }
+}
+
+function mergeStoredSettings(partialSettings) {
+  storedSettings = normalizeSettings({
+    ...storedSettings,
+    ...partialSettings,
+    windowBounds: {
+      ...storedSettings.windowBounds,
+      ...partialSettings?.windowBounds,
+    },
+  });
+  return storedSettings;
+}
+
+function getRestoredWindowBounds() {
+  const { width, height } = storedSettings.windowBounds;
+  const { width: displayWidth, height: displayHeight } = screen.getPrimaryDisplay().workAreaSize;
+  return {
+    width: Math.min(width, Math.max(MIN_WINDOW_WIDTH, displayWidth)),
+    height: Math.min(height, Math.max(MIN_WINDOW_HEIGHT, displayHeight)),
   };
 }
 
@@ -104,19 +150,46 @@ function sendToMain(channel, payload) {
   }
 }
 
-function queueSettingsSave(settings) {
-  const serializedSettings = JSON.stringify(normalizeSettings(settings), null, 2);
+function queueSettingsSave(partialSettings) {
+  mergeStoredSettings(partialSettings);
   settingsWriteQueue = settingsWriteQueue
     .catch(() => {})
-    .then(() => fs.promises.writeFile(settingsPath, serializedSettings, 'utf8'))
+    .then(() => fs.promises.writeFile(settingsPath, JSON.stringify(storedSettings, null, 2), 'utf8'))
     .catch((error) => console.error('保存设置失败：', error));
 }
 
+function saveWindowBounds() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const [width, height] = mainWindow.getSize();
+  mergeStoredSettings({ windowBounds: { width, height } });
+}
+
+function scheduleWindowBoundsSave() {
+  clearTimeout(windowStateSaveTimer);
+  windowStateSaveTimer = setTimeout(() => {
+    saveWindowBounds();
+    queueSettingsSave({});
+  }, WINDOW_STATE_SAVE_DELAY);
+}
+
+function persistWindowBoundsBeforeClose() {
+  clearTimeout(windowStateSaveTimer);
+  saveWindowBounds();
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(storedSettings, null, 2), 'utf8');
+  } catch (error) {
+    console.error('保存窗口尺寸失败：', error);
+  }
+}
+
 function createWindow() {
+  storedSettings = loadStoredSettings();
+  const restoredBounds = getRestoredWindowBounds();
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 600,
-    resizable: false,
+    ...restoredBounds,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
+    resizable: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -125,6 +198,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.on('resize', scheduleWindowBoundsSave);
   mainWindow.on('close', (event) => {
     const choice = dialog.showMessageBoxSync(mainWindow, {
       type: 'question',
@@ -132,21 +206,17 @@ function createWindow() {
       title: '确认退出？',
       message: '安全提示：退出后当前输入的所有消息及名单将在内存中彻底销毁，软件不留任何本地草稿。',
     });
-    if (choice === 1) event.preventDefault();
+    if (choice === 1) {
+      event.preventDefault();
+      return;
+    }
+    persistWindowBoundsBeforeClose();
   });
 }
 
 app.whenReady().then(createWindow);
 
-ipcMain.handle('load-settings', async () => {
-  try {
-    const savedSettings = await fs.promises.readFile(settingsPath, 'utf8');
-    return normalizeSettings(JSON.parse(savedSettings));
-  } catch (error) {
-    if (error.code !== 'ENOENT') console.error('读取设置失败：', error);
-    return null;
-  }
-});
+ipcMain.handle('load-settings', async () => storedSettings || loadStoredSettings());
 
 ipcMain.handle('get-runtime-profile', () => ({
   platform: process.platform,
