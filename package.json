@@ -1,6 +1,6 @@
 {
   "name": "teamsecho",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "Microsoft Teams 桌面自动化辅助工具",
   "main": "src/main.js",
   "author": "",
@@ -34,6 +34,8 @@
     "asar": true
   },
   "overrides": {
-    "tar": "^7.5.11"
+    "tar": "^7.5.11",
+    "fast-uri": "^3.1.7",
+    "@xmldom/xmldom": "^0.8.15"
   }
 }
